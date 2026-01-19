@@ -1281,6 +1281,433 @@ def create_trend_notification(user_id: str, category: str, growth_rate: float,
         return f"创建趋势通知失败: {str(e)}\n详细信息: {error_details}"
 
 
+@tool
+def parse_product_link(product_url: str, analysis_depth: str = "standard") -> str:
+    """
+    分析淘宝/拼多多产品链接，获取产品详细信息并进行市场分析。
+    
+    Args:
+        product_url: 产品链接（淘宝/拼多多），如 https://item.taobao.com/item.htm?id=123456
+        analysis_depth: 分析深度（quick/standard/deep），默认standard
+    
+    Returns:
+        产品分析结果的JSON格式字符串，包含产品信息、市场分析、货源建议等
+    """
+    try:
+        import re
+        from datetime import datetime
+        from coze_coding_dev_sdk import get_session
+        from storage.database.shared.model import ProductLinkAnalysis
+
+        # 1. 识别平台
+        platform = None
+        product_id = None
+
+        if "taobao.com" in product_url or "tmall.com" in product_url:
+            platform = "taobao"
+            # 提取商品ID
+            id_match = re.search(r'id=(\d+)', product_url)
+            if id_match:
+                product_id = id_match.group(1)
+        elif "yangkeduo.com" in product_url or "pinduoduo.com" in product_url or "m.pinduoduo.com" in product_url:
+            platform = "pinduoduo"
+            # 提取商品ID
+            id_match = re.search(r'goods[_]?id=(\d+)', product_url)
+            if id_match:
+                product_id = id_match.group(1)
+        elif "jd.com" in product_url:
+            platform = "jd"
+            # 提取商品ID
+            id_match = re.search(r'/(\d+)\.html', product_url)
+            if id_match:
+                product_id = id_match.group(1)
+        else:
+            return json.dumps({
+                "success": False,
+                "error": "不支持的平台链接，仅支持淘宝、拼多多、京东"
+            }, ensure_ascii=False, indent=2)
+
+        # 2. 使用网络搜索获取产品信息
+        search_query = f"{product_url} 产品详情 销量 评价"
+        
+        ctx = new_context(method="search.product")
+        client = SearchClient(ctx=ctx)
+        
+        response = client.web_search(
+            query=search_query,
+            count=15,
+            need_summary=True
+        )
+        
+        # 3. 分析搜索结果，提取产品信息
+        product_info = {
+            "platform": platform,
+            "product_id": product_id,
+            "product_url": product_url
+        }
+        
+        # 从搜索结果中提取信息
+        search_results = []
+        if response.web_items:
+            for item in response.web_items:
+                search_results.append({
+                    "title": item.title,
+                    "url": item.url,
+                    "snippet": item.snippet,
+                    "site_name": item.site_name
+                })
+        
+        # 基于搜索结果推断产品信息
+        if search_results:
+            # 从标题中提取产品名称
+            first_title = search_results[0]["title"]
+            product_info["product_title"] = first_title[:200]  # 限制长度
+            
+            # 从摘要中提取关键信息
+            ai_summary = response.summary if hasattr(response, 'summary') else ""
+            product_info["ai_summary"] = ai_summary
+        
+        # 4. 进行市场分析和货源搜索
+        # 提取品类（从标题或搜索结果）
+        category_keywords = []
+        if "product_title" in product_info:
+            # 简单提取可能的品类关键词
+            title = product_info["product_title"]
+            # 常见品类关键词
+            common_categories = ["面膜", "手机壳", "衣服", "鞋", "包", "食品", "化妆品", "数码", "家电", "家居"]
+            for cat in common_categories:
+                if cat in title:
+                    category_keywords.append(cat)
+        
+        category = category_keywords[0] if category_keywords else "其他"
+        product_info["category"] = category
+        
+        # 搜索该品类在1688和阿里巴巴的货源
+        sourcing_results = []
+        
+        try:
+            sourcing_query = f"1688 {category} 同款 批发"
+            sourcing_response = client.search(
+                query=sourcing_query,
+                search_type="web_summary",
+                count=10,
+                sites="1688.com",
+                need_summary=True
+            )
+            
+            if sourcing_response.web_items:
+                for item in sourcing_response.web_items:
+                    sourcing_results.append({
+                        "source": "1688",
+                        "title": item.title,
+                        "url": item.url,
+                        "snippet": item.snippet
+                    })
+        except Exception as e:
+            pass
+        
+        # 5. 竞品分析
+        competitor_results = []
+        try:
+            competitor_query = f"淘宝 {category} 热销 销量排行"
+            competitor_response = client.search(
+                query=competitor_query,
+                search_type="web_summary",
+                count=10,
+                need_summary=True
+            )
+            
+            if competitor_response.web_items:
+                for item in competitor_response.web_items:
+                    competitor_results.append({
+                        "title": item.title,
+                        "url": item.url,
+                        "snippet": item.snippet
+                    })
+        except Exception as e:
+            pass
+        
+        # 6. 综合分析结果
+        analysis_result = {
+            "success": True,
+            "product_info": product_info,
+            "market_analysis": {
+                "category": category,
+                "competitor_count": len(competitor_results),
+                "sourcing_count": len(sourcing_results),
+                "analysis_depth": analysis_depth
+            },
+            "sourcing_opportunities": sourcing_results,
+            "competitors": competitor_results,
+            "analysis_summary": f"已成功分析{platform}平台产品链接，识别为{category}品类，找到{len(sourcing_results)}个潜在货源和{len(competitor_results)}个竞品。",
+            "analyzed_at": datetime.now().isoformat()
+        }
+        
+        # 7. 保存分析结果到数据库
+        db = get_session()
+        try:
+            # 创建分析记录
+            analysis = ProductLinkAnalysis(
+                original_url=product_url,
+                platform=platform,
+                product_id=product_id,
+                product_title=product_info.get("product_title"),
+                category=category,
+                market_analysis=json.dumps(analysis_result["market_analysis"], ensure_ascii=False),
+                competitor_info=json.dumps(competitor_results[:5], ensure_ascii=False),  # 只保存前5个
+                sourcing_suggestions=json.dumps(sourcing_results[:5], ensure_ascii=False),  # 只保存前5个
+                analysis_summary=analysis_result["analysis_summary"],
+                potential_score=min(10, len(sourcing_results) // 2 + 5),  # 简单计算潜力分数
+                status="analyzed",
+                analyzed_at=datetime.now()
+            )
+            
+            db.add(analysis)
+            db.commit()
+            
+            analysis_result["database_id"] = analysis.id
+            analysis_result["saved_to_db"] = True
+            
+        except Exception as e:
+            db.rollback()
+            analysis_result["saved_to_db"] = False
+            analysis_result["db_error"] = str(e)
+        finally:
+            db.close()
+        
+        return json.dumps(analysis_result, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return json.dumps({
+            "success": False,
+            "error": f"产品链接分析失败: {str(e)}",
+            "details": error_details
+        }, ensure_ascii=False, indent=2)
+
+
+@tool
+def parse_shop_link(shop_url: str, analysis_depth: str = "standard") -> str:
+    """
+    分析淘宝/拼多多店铺链接，获取店铺详细信息并进行市场分析。
+    
+    Args:
+        shop_url: 店铺链接（淘宝/拼多多），如 https://shop12345.taobao.com
+        analysis_depth: 分析深度（quick/standard/deep），默认standard
+    
+    Returns:
+        店铺分析结果的JSON格式字符串，包含店铺信息、产品分析、货源机会等
+    """
+    try:
+        import re
+        from datetime import datetime
+        from coze_coding_dev_sdk import get_session
+        from storage.database.shared.model import ShopLinkAnalysis
+
+        # 1. 识别平台
+        platform = None
+        shop_id = None
+
+        if "taobao.com" in shop_url or "tmall.com" in shop_url:
+            platform = "taobao"
+            # 提取店铺ID
+            id_match = re.search(r'shop(\d+)', shop_url)
+            if id_match:
+                shop_id = id_match.group(1)
+            else:
+                # 尝试从URL中提取
+                id_match = re.search(r'shop_id=(\d+)', shop_url)
+                if id_match:
+                    shop_id = id_match.group(1)
+        elif "yangkeduo.com" in shop_url or "pinduoduo.com" in shop_url or "m.pinduoduo.com" in shop_url:
+            platform = "pinduoduo"
+            # 提取店铺ID
+            id_match = re.search(r'mall[_]?id=(\d+)', shop_url)
+            if id_match:
+                shop_id = id_match.group(1)
+        elif "jd.com" in shop_url:
+            platform = "jd"
+            # 提取店铺ID
+            id_match = re.search(r'shop[_]?id=(\d+)', shop_url)
+            if id_match:
+                shop_id = id_match.group(1)
+        else:
+            return json.dumps({
+                "success": False,
+                "error": "不支持的平台链接，仅支持淘宝、拼多多、京东"
+            }, ensure_ascii=False, indent=2)
+
+        # 2. 使用网络搜索获取店铺信息
+        search_query = f"{shop_url} 店铺信息 销量 产品"
+        
+        ctx = new_context(method="search.shop")
+        client = SearchClient(ctx=ctx)
+        
+        response = client.web_search(
+            query=search_query,
+            count=15,
+            need_summary=True
+        )
+        
+        # 3. 分析搜索结果，提取店铺信息
+        shop_info = {
+            "platform": platform,
+            "shop_id": shop_id,
+            "shop_url": shop_url
+        }
+        
+        # 从搜索结果中提取信息
+        search_results = []
+        if response.web_items:
+            for item in response.web_items:
+                search_results.append({
+                    "title": item.title,
+                    "url": item.url,
+                    "snippet": item.snippet,
+                    "site_name": item.site_name
+                })
+        
+        # 基于搜索结果推断店铺信息
+        if search_results:
+            first_title = search_results[0]["title"]
+            shop_info["shop_name"] = first_title[:100]  # 限制长度
+            
+            # 从摘要中提取关键信息
+            ai_summary = response.summary if hasattr(response, 'summary') else ""
+            shop_info["ai_summary"] = ai_summary
+        
+        # 4. 搜索店铺的热销产品
+        top_products = []
+        main_category = "未知"
+        
+        try:
+            # 从搜索结果中推断品类
+            if "shop_name" in shop_info:
+                shop_name = shop_info["shop_name"]
+                # 常见店铺类型关键词
+                shop_types = ["旗舰店", "专营店", "专卖店", "官方店"]
+                for shop_type in shop_types:
+                    if shop_type in shop_name:
+                        shop_info["shop_type"] = shop_type
+                        break
+                
+                # 从店名推断主营品类
+                common_categories = ["美妆", "服饰", "数码", "家电", "食品", "家居", "母婴", "运动"]
+                for cat in common_categories:
+                    if cat in shop_name:
+                        main_category = cat
+                        break
+            
+            shop_info["main_category"] = main_category
+            
+            # 搜索该店铺的热销产品
+            product_search_query = f"{shop_url} 热销产品 销量排行"
+            product_response = client.search(
+                query=product_search_query,
+                search_type="web_summary",
+                count=10,
+                need_summary=True
+            )
+            
+            if product_response.web_items:
+                for idx, item in enumerate(product_response.web_items[:5], 1):
+                    top_products.append({
+                        "rank": idx,
+                        "title": item.title,
+                        "url": item.url,
+                        "snippet": item.snippet
+                    })
+        except Exception as e:
+            pass
+        
+        # 5. 搜索该品类的货源机会
+        sourcing_opportunities = []
+        try:
+            sourcing_query = f"1688 {main_category} 店铺货源 批发工厂"
+            sourcing_response = client.search(
+                query=sourcing_query,
+                search_type="web_summary",
+                count=10,
+                sites="1688.com",
+                need_summary=True
+            )
+            
+            if sourcing_response.web_items:
+                for item in sourcing_response.web_items:
+                    sourcing_opportunities.append({
+                        "source": "1688",
+                        "title": item.title,
+                        "url": item.url,
+                        "snippet": item.snippet
+                    })
+        except Exception as e:
+            pass
+        
+        # 6. 市场定位分析
+        market_position = {
+            "category": main_category,
+            "platform": platform,
+            "product_count": len(top_products),
+            "sourcing_count": len(sourcing_opportunities)
+        }
+        
+        # 7. 综合分析结果
+        analysis_result = {
+            "success": True,
+            "shop_info": shop_info,
+            "top_products": top_products,
+            "market_position": market_position,
+            "sourcing_opportunities": sourcing_opportunities,
+            "analysis_summary": f"已成功分析{platform}平台店铺链接，识别为{main_category}品类店铺，发现{len(top_products)}个热销产品和{len(sourcing_opportunities)}个潜在货源机会。",
+            "analyzed_at": datetime.now().isoformat()
+        }
+        
+        # 8. 保存分析结果到数据库
+        db = get_session()
+        try:
+            # 创建分析记录
+            analysis = ShopLinkAnalysis(
+                original_url=shop_url,
+                platform=platform,
+                shop_id=shop_id,
+                shop_name=shop_info.get("shop_name"),
+                shop_type=shop_info.get("shop_type"),
+                main_category=main_category,
+                product_count=len(top_products),
+                top_products=json.dumps(top_products, ensure_ascii=False),
+                market_position=json.dumps(market_position, ensure_ascii=False),
+                sourcing_opportunities=json.dumps(sourcing_opportunities[:5], ensure_ascii=False),
+                analysis_summary=analysis_result["analysis_summary"],
+                status="analyzed",
+                analyzed_at=datetime.now()
+            )
+            
+            db.add(analysis)
+            db.commit()
+            
+            analysis_result["database_id"] = analysis.id
+            analysis_result["saved_to_db"] = True
+            
+        except Exception as e:
+            db.rollback()
+            analysis_result["saved_to_db"] = False
+            analysis_result["db_error"] = str(e)
+        finally:
+            db.close()
+        
+        return json.dumps(analysis_result, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return json.dumps({
+            "success": False,
+            "error": f"店铺链接分析失败: {str(e)}",
+            "details": error_details
+        }, ensure_ascii=False, indent=2)
+
+
 def build_agent(ctx=None):
     workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
     config_path = os.path.join(workspace_path, LLM_CONFIG)
@@ -1336,7 +1763,10 @@ def build_agent(ctx=None):
         generate_trend_chart,
         # 通知工具
         get_notifications,
-        create_trend_notification
+        create_trend_notification,
+        # 链接分析工具
+        parse_product_link,
+        parse_shop_link
     ]
     
     return create_agent(

@@ -138,3 +138,70 @@ class Notification(Base):
         Index("ix_notifications_user_id_created", "user_id", "created_at"),
     )
 
+
+class ProductLinkAnalysis(Base):
+    """产品链接分析表，存储淘宝/拼多多产品链接的分析结果"""
+    __tablename__ = "product_link_analyses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="分析ID")
+    original_url = Column(Text, nullable=False, comment="原始产品链接")
+    platform = Column(String(50), nullable=False, index=True, comment="平台：taobao/pinduoduo/jd等")
+    product_id = Column(String(100), nullable=True, index=True, comment="平台产品ID")
+    product_title = Column(String(500), nullable=True, comment="产品标题")
+    category = Column(String(100), nullable=True, index=True, comment="产品品类")
+    price = Column(Float, nullable=True, comment="产品价格")
+    sales_count = Column(Integer, nullable=True, comment="销量")
+    rating = Column(Float, nullable=True, comment="评分")
+    review_count = Column(Integer, nullable=True, comment="评价数")
+    image_urls = Column(JSON, nullable=True, comment="产品图片URL列表")
+    shop_name = Column(String(255), nullable=True, comment="店铺名称")
+    shop_url = Column(Text, nullable=True, comment="店铺链接")
+    market_analysis = Column(JSON, nullable=True, comment="市场分析数据")
+    competitor_info = Column(JSON, nullable=True, comment="竞品信息")
+    sourcing_suggestions = Column(JSON, nullable=True, comment="货源建议")
+    analysis_summary = Column(Text, nullable=True, comment="分析摘要")
+    potential_score = Column(Integer, nullable=True, comment="潜力分数（1-10分）")
+    status = Column(String(50), default="analyzed", nullable=False, comment="状态：analyzed/failed/pending")
+    error_message = Column(Text, nullable=True, comment="错误信息")
+    analyzed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="分析时间")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="创建时间")
+
+    __table_args__ = (
+        Index("ix_product_link_platform_id", "platform", "product_id"),
+        Index("ix_product_link_category_score", "category", "potential_score"),
+        Index("ix_product_link_analyzed_at", "analyzed_at"),
+    )
+
+
+class ShopLinkAnalysis(Base):
+    """店铺链接分析表，存储淘宝/拼多多店铺链接的分析结果"""
+    __tablename__ = "shop_link_analyses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="分析ID")
+    original_url = Column(Text, nullable=False, comment="原始店铺链接")
+    platform = Column(String(50), nullable=False, index=True, comment="平台：taobao/pinduoduo/jd等")
+    shop_id = Column(String(100), nullable=True, index=True, comment="平台店铺ID")
+    shop_name = Column(String(255), nullable=True, comment="店铺名称")
+    shop_type = Column(String(50), nullable=True, comment="店铺类型：旗舰店/专营店/个人店")
+    shop_rating = Column(Float, nullable=True, comment="店铺评分")
+    main_category = Column(String(100), nullable=True, comment="主营品类")
+    product_count = Column(Integer, nullable=True, comment="商品数量")
+    total_sales = Column(BigInteger, nullable=True, comment="总销量")
+    follower_count = Column(Integer, nullable=True, comment="粉丝数")
+    founded_date = Column(DateTime(timezone=True), nullable=True, comment="开店时间")
+    top_products = Column(JSON, nullable=True, comment="热销产品列表")
+    pricing_analysis = Column(JSON, nullable=True, comment="定价分析")
+    market_position = Column(JSON, nullable=True, comment="市场定位分析")
+    sourcing_opportunities = Column(JSON, nullable=True, comment="货源机会")
+    analysis_summary = Column(Text, nullable=True, comment="分析摘要")
+    status = Column(String(50), default="analyzed", nullable=False, comment="状态：analyzed/failed/pending")
+    error_message = Column(Text, nullable=True, comment="错误信息")
+    analyzed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="分析时间")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="创建时间")
+
+    __table_args__ = (
+        Index("ix_shop_link_platform_id", "platform", "shop_id"),
+        Index("ix_shop_link_category_sales", "main_category", "total_sales"),
+        Index("ix_shop_link_analyzed_at", "analyzed_at"),
+    )
+
