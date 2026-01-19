@@ -1,0 +1,33 @@
+{
+  "rate_limit": {
+    "max_calls_per_minute": 30,
+    "max_calls_per_hour": 300,
+    "cooldown_time": 300
+  },
+  "cache": {
+    "default_ttl": 3600,
+    "search_ttl": 1800,
+    "trend_ttl": 3600,
+    "supplier_ttl": 7200
+  },
+  "retry": {
+    "max_retries": 3,
+    "base_delay": 1.0,
+    "max_delay": 10.0,
+    "backoff_factor": 2.0
+  },
+  "services": {
+    "database": {
+      "enabled": true,
+      "fallback_enabled": true
+    },
+    "search": {
+      "enabled": true,
+      "fallback_enabled": true
+    },
+    "trend": {
+      "enabled": true,
+      "fallback_enabled": true
+    }
+  }
+}
