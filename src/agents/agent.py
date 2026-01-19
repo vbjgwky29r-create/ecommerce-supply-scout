@@ -10,6 +10,7 @@ from langchain.tools import tool, ToolRuntime
 from coze_coding_utils.runtime_ctx.context import default_headers, new_context
 from coze_coding_dev_sdk import SearchClient, get_session
 from storage.memory.memory_saver import get_memory_saver
+from storage.database.db import execute_with_retry
 from storage.database.supplier_manager import (
     SupplierManager, SupplierCreate, ProductCreate, 
     ProductUpdate, MarketTrendCreate
@@ -444,8 +445,7 @@ def save_supplier_to_db(name: str, company_name: str = None, contact_person: str
         保存结果的JSON格式字符串
     """
     try:
-        db = get_session()
-        try:
+        def save_supplier(db):
             mgr = SupplierManager()
             supplier_in = SupplierCreate(
                 name=name,
@@ -464,15 +464,20 @@ def save_supplier_to_db(name: str, company_name: str = None, contact_person: str
                 source="智能体搜索"
             )
             supplier = mgr.create_supplier(db, supplier_in)
-            
-            result = {
-                "success": True,
-                "supplier_id": supplier.id,
-                "message": f"供应商'{name}'已成功保存到数据库"
+            db.refresh(supplier)  # 刷新以获取ID
+            return {
+                "id": supplier.id,
+                "name": supplier.name
             }
-            return json.dumps(result, ensure_ascii=False, indent=2)
-        finally:
-            db.close()
+        
+        supplier_data = execute_with_retry(save_supplier, max_retries=3, retry_delay=1)
+
+        result = {
+            "success": True,
+            "supplier_id": supplier_data["id"],
+            "message": f"供应商'{name}'已成功保存到数据库"
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
@@ -504,8 +509,7 @@ def save_product_to_db(supplier_id: int, name: str, category: str = None,
         保存结果的JSON格式字符串
     """
     try:
-        db = get_session()
-        try:
+        def save_product(db):
             mgr = SupplierManager()
             product_in = ProductCreate(
                 supplier_id=supplier_id,
@@ -521,18 +525,25 @@ def save_product_to_db(supplier_id: int, name: str, category: str = None,
                 notes=notes
             )
             product = mgr.create_product(db, product_in)
-            
-            result = {
-                "success": True,
-                "product_id": product.id,
-                "supplier_id": supplier_id,
+            db.refresh(product)  # 刷新以获取ID
+            return {
+                "id": product.id,
+                "name": product.name,
                 "profit_margin": product.profit_margin,
-                "roi": product.roi,
-                "message": f"产品'{name}'已成功保存到数据库"
+                "roi": product.roi
             }
-            return json.dumps(result, ensure_ascii=False, indent=2)
-        finally:
-            db.close()
+        
+        product_data = execute_with_retry(save_product, max_retries=3, retry_delay=1)
+
+        result = {
+            "success": True,
+            "product_id": product_data["id"],
+            "supplier_id": supplier_id,
+            "profit_margin": product_data["profit_margin"],
+            "roi": product_data["roi"],
+            "message": f"产品'{name}'已成功保存到数据库"
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
@@ -1444,36 +1455,39 @@ def parse_product_link(product_url: str, analysis_depth: str = "standard") -> st
         }
         
         # 7. 保存分析结果到数据库
-        db = get_session()
         try:
-            # 创建分析记录
-            analysis = ProductLinkAnalysis(
-                original_url=product_url,
-                platform=platform,
-                product_id=product_id,
-                product_title=product_info.get("product_title"),
-                category=category,
-                market_analysis=json.dumps(analysis_result["market_analysis"], ensure_ascii=False),
-                competitor_info=json.dumps(competitor_results[:5], ensure_ascii=False),  # 只保存前5个
-                sourcing_suggestions=json.dumps(sourcing_results[:5], ensure_ascii=False),  # 只保存前5个
-                analysis_summary=analysis_result["analysis_summary"],
-                potential_score=min(10, len(sourcing_results) // 2 + 5),  # 简单计算潜力分数
-                status="analyzed",
-                analyzed_at=datetime.now()
-            )
-            
-            db.add(analysis)
-            db.commit()
-            
-            analysis_result["database_id"] = analysis.id
+            def save_analysis(db):
+                # 创建分析记录
+                analysis = ProductLinkAnalysis(
+                    original_url=product_url,
+                    platform=platform,
+                    product_id=product_id,
+                    product_title=product_info.get("product_title"),
+                    category=category,
+                    market_analysis=json.dumps(analysis_result["market_analysis"], ensure_ascii=False),
+                    competitor_info=json.dumps(competitor_results[:5], ensure_ascii=False),  # 只保存前5个
+                    sourcing_suggestions=json.dumps(sourcing_results[:5], ensure_ascii=False),  # 只保存前5个
+                    analysis_summary=analysis_result["analysis_summary"],
+                    potential_score=min(10, len(sourcing_results) // 2 + 5),  # 简单计算潜力分数
+                    status="analyzed",
+                    analyzed_at=datetime.now()
+                )
+
+                db.add(analysis)
+                db.commit()
+                db.refresh(analysis)  # 刷新以获取ID
+                return analysis.id  # 只返回ID
+
+            analysis_id = execute_with_retry(save_analysis, max_retries=3, retry_delay=1)
+            analysis_result["database_id"] = analysis_id
             analysis_result["saved_to_db"] = True
-            
+
         except Exception as e:
-            db.rollback()
+            import traceback
+            error_details = traceback.format_exc()
             analysis_result["saved_to_db"] = False
             analysis_result["db_error"] = str(e)
-        finally:
-            db.close()
+            analysis_result["db_error_details"] = error_details
         
         return json.dumps(analysis_result, ensure_ascii=False, indent=2)
         
@@ -1664,37 +1678,40 @@ def parse_shop_link(shop_url: str, analysis_depth: str = "standard") -> str:
         }
         
         # 8. 保存分析结果到数据库
-        db = get_session()
         try:
-            # 创建分析记录
-            analysis = ShopLinkAnalysis(
-                original_url=shop_url,
-                platform=platform,
-                shop_id=shop_id,
-                shop_name=shop_info.get("shop_name"),
-                shop_type=shop_info.get("shop_type"),
-                main_category=main_category,
-                product_count=len(top_products),
-                top_products=json.dumps(top_products, ensure_ascii=False),
-                market_position=json.dumps(market_position, ensure_ascii=False),
-                sourcing_opportunities=json.dumps(sourcing_opportunities[:5], ensure_ascii=False),
-                analysis_summary=analysis_result["analysis_summary"],
-                status="analyzed",
-                analyzed_at=datetime.now()
-            )
-            
-            db.add(analysis)
-            db.commit()
-            
-            analysis_result["database_id"] = analysis.id
+            def save_analysis(db):
+                # 创建分析记录
+                analysis = ShopLinkAnalysis(
+                    original_url=shop_url,
+                    platform=platform,
+                    shop_id=shop_id,
+                    shop_name=shop_info.get("shop_name"),
+                    shop_type=shop_info.get("shop_type"),
+                    main_category=main_category,
+                    product_count=len(top_products),
+                    top_products=json.dumps(top_products, ensure_ascii=False),
+                    market_position=json.dumps(market_position, ensure_ascii=False),
+                    sourcing_opportunities=json.dumps(sourcing_opportunities[:5], ensure_ascii=False),
+                    analysis_summary=analysis_result["analysis_summary"],
+                    status="analyzed",
+                    analyzed_at=datetime.now()
+                )
+
+                db.add(analysis)
+                db.commit()
+                db.refresh(analysis)  # 刷新以获取ID
+                return analysis.id  # 只返回ID
+
+            analysis_id = execute_with_retry(save_analysis, max_retries=3, retry_delay=1)
+            analysis_result["database_id"] = analysis_id
             analysis_result["saved_to_db"] = True
-            
+
         except Exception as e:
-            db.rollback()
+            import traceback
+            error_details = traceback.format_exc()
             analysis_result["saved_to_db"] = False
             analysis_result["db_error"] = str(e)
-        finally:
-            db.close()
+            analysis_result["db_error_details"] = error_details
         
         return json.dumps(analysis_result, ensure_ascii=False, indent=2)
         
