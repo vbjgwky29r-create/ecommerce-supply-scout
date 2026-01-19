@@ -14,7 +14,7 @@ from storage.database.supplier_manager import (
     SupplierManager, SupplierCreate, ProductCreate, 
     ProductUpdate, MarketTrendCreate
 )
-from storage.database.shared.model import Supplier, Product, MarketTrend
+from storage.database.shared.model import Supplier, Product, MarketTrend, UserPreference, Notification
 
 LLM_CONFIG = "config/agent_llm_config.json"
 
@@ -732,6 +732,555 @@ def query_trends_from_db(category: str = None, platform: str = None, limit: int 
         error_details = traceback.format_exc()
         return f"查询趋势数据失败: {str(e)}\n详细信息: {error_details}"
 
+@tool
+def search_1688_tool(keyword: str, category: str = None, min_price: float = None,
+                      max_price: float = None, count: int = 10) -> str:
+    """
+    在1688平台上搜索供应商和产品信息。
+    
+    Args:
+        keyword: 搜索关键词，如"面膜"、"手机壳"等
+        category: 产品品类，用于更精确的搜索
+        min_price: 最低进货价
+        max_price: 最高进货价
+        count: 返回结果数量，默认10条
+    
+    Returns:
+        1688搜索结果的JSON格式字符串
+    """
+    try:
+        # 构建搜索查询
+        search_parts = ["1688", keyword]
+        if category:
+            search_parts.append(category)
+        if min_price and max_price:
+            search_parts.append(f"价格{min_price}-{max_price}")
+        search_parts.append("批发")
+        
+        search_query = " ".join(search_parts)
+        
+        ctx = new_context(method="search.1688")
+        client = SearchClient(ctx=ctx)
+        
+        response = client.search(
+            query=search_query,
+            search_type="web_summary",
+            count=count,
+            sites="1688.com",
+            need_summary=True
+        )
+        
+        results = []
+        if response.web_items:
+            for item in response.web_items:
+                result = {
+                    "title": item.title,
+                    "url": item.url,
+                    "snippet": item.snippet,
+                    "site_name": item.site_name,
+                    "summary": item.summary if hasattr(item, 'summary') else ""
+                }
+                results.append(result)
+        
+        output = {
+            "platform": "1688",
+            "keyword": keyword,
+            "total_results": len(results),
+            "ai_summary": response.summary if hasattr(response, 'summary') else "",
+            "results": results
+        }
+        
+        return json.dumps(output, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"1688搜索失败: {str(e)}\n详细信息: {error_details}"
+
+
+@tool
+def search_alibaba_tool(keyword: str, category: str = None, min_price: float = None,
+                        max_price: float = None, count: int = 10) -> str:
+    """
+    在阿里巴巴国际站上搜索供应商和产品信息。
+    
+    Args:
+        keyword: 搜索关键词
+        category: 产品品类
+        min_price: 最低进货价
+        max_price: 最高进货价
+        count: 返回结果数量，默认10条
+    
+    Returns:
+        阿里巴巴搜索结果的JSON格式字符串
+    """
+    try:
+        search_parts = ["alibaba", keyword]
+        if category:
+            search_parts.append(category)
+        if min_price and max_price:
+            search_parts.append(f"price{min_price}-{max_price}")
+        search_parts.append("wholesale")
+        
+        search_query = " ".join(search_parts)
+        
+        ctx = new_context(method="search.alibaba")
+        client = SearchClient(ctx=ctx)
+        
+        response = client.search(
+            query=search_query,
+            search_type="web_summary",
+            count=count,
+            sites="alibaba.com",
+            need_summary=True
+        )
+        
+        results = []
+        if response.web_items:
+            for item in response.web_items:
+                result = {
+                    "title": item.title,
+                    "url": item.url,
+                    "snippet": item.snippet,
+                    "site_name": item.site_name,
+                    "summary": item.summary if hasattr(item, 'summary') else ""
+                }
+                results.append(result)
+        
+        output = {
+            "platform": "阿里巴巴",
+            "keyword": keyword,
+            "total_results": len(results),
+            "ai_summary": response.summary if hasattr(response, 'summary') else "",
+            "results": results
+        }
+        
+        return json.dumps(output, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"阿里巴巴搜索失败: {str(e)}\n详细信息: {error_details}"
+
+
+@tool
+def save_user_preference(user_id: str, preferred_categories: list = None,
+                         min_price: float = None, max_price: float = None,
+                         preferred_platforms: list = None, preferred_regions: list = None,
+                         min_roi: float = None, min_profit_margin: float = None,
+                         keywords: list = None, exclude_keywords: list = None,
+                         notification_enabled: bool = True) -> str:
+    """
+    保存或更新用户偏好设置。
+    
+    Args:
+        user_id: 用户ID（必填）
+        preferred_categories: 偏好品类列表
+        min_price: 最低进货价
+        max_price: 最高进货价
+        preferred_platforms: 偏好平台列表
+        preferred_regions: 偏好地区列表
+        min_roi: 最低ROI要求（%）
+        min_profit_margin: 最低利润率要求（%）
+        keywords: 关注关键词列表
+        exclude_keywords: 排除关键词列表
+        notification_enabled: 是否启用通知
+    
+    Returns:
+        保存结果的JSON格式字符串
+    """
+    try:
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            pref = mgr.create_or_update_preference(
+                db=db,
+                user_id=user_id,
+                preferred_categories=preferred_categories,
+                min_price=min_price,
+                max_price=max_price,
+                preferred_platforms=preferred_platforms,
+                preferred_regions=preferred_regions,
+                min_roi=min_roi,
+                min_profit_margin=min_profit_margin,
+                keywords=keywords,
+                exclude_keywords=exclude_keywords,
+                notification_enabled=notification_enabled
+            )
+            
+            result = {
+                "success": True,
+                "user_id": user_id,
+                "message": "用户偏好已成功保存",
+                "preferences": {
+                    "preferred_categories": preferred_categories or [],
+                    "min_price": min_price,
+                    "max_price": max_price,
+                    "preferred_platforms": preferred_platforms or [],
+                    "preferred_regions": preferred_regions or [],
+                    "min_roi": min_roi,
+                    "min_profit_margin": min_profit_margin,
+                    "notification_enabled": notification_enabled
+                }
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"保存用户偏好失败: {str(e)}\n详细信息: {error_details}"
+
+
+@tool
+def get_user_preference(user_id: str) -> str:
+    """
+    获取用户的偏好设置。
+    
+    Args:
+        user_id: 用户ID（必填）
+    
+    Returns:
+        用户偏好设置的JSON格式字符串
+    """
+    try:
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            pref = mgr.get_user_preference(db, user_id)
+            
+            if not pref:
+                result = {
+                    "success": False,
+                    "message": "未找到用户偏好设置"
+                }
+                return json.dumps(result, ensure_ascii=False, indent=2)
+            
+            # 解析JSON字段
+            categories = []
+            if pref.preferred_categories is not None:
+                try:
+                    categories = json.loads(pref.preferred_categories)
+                except:
+                    pass
+            
+            platforms = []
+            if pref.preferred_platforms is not None:
+                try:
+                    platforms = json.loads(pref.preferred_platforms)
+                except:
+                    pass
+            
+            regions = []
+            if pref.preferred_regions is not None:
+                try:
+                    regions = json.loads(pref.preferred_regions)
+                except:
+                    pass
+            
+            keywords = []
+            if pref.keywords is not None:
+                try:
+                    keywords = json.loads(pref.keywords)
+                except:
+                    pass
+            
+            exclude_keywords = []
+            if pref.exclude_keywords is not None:
+                try:
+                    exclude_keywords = json.loads(pref.exclude_keywords)
+                except:
+                    pass
+            
+            result = {
+                "success": True,
+                "user_id": user_id,
+                "preferences": {
+                    "preferred_categories": categories,
+                    "min_price": pref.min_price,
+                    "max_price": pref.max_price,
+                    "preferred_platforms": platforms,
+                    "preferred_regions": regions,
+                    "min_roi": pref.min_roi,
+                    "min_profit_margin": pref.min_profit_margin,
+                    "keywords": keywords,
+                    "exclude_keywords": exclude_keywords,
+                    "notification_enabled": pref.notification_enabled
+                },
+                "created_at": pref.created_at.isoformat() if pref.created_at is not None else None,
+                "updated_at": pref.updated_at.isoformat() if pref.updated_at is not None else None
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"获取用户偏好失败: {str(e)}\n详细信息: {error_details}"
+
+
+@tool
+def batch_import_suppliers(suppliers_data: list, source: str = "batch_import") -> str:
+    """
+    批量导入供应商数据到数据库。
+    
+    Args:
+        suppliers_data: 供应商数据列表，每个元素是一个字典，包含供应商信息
+        source: 数据来源，默认"batch_import"
+    
+    Returns:
+        批量导入结果的JSON格式字符串
+    """
+    try:
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            result = mgr.batch_import_suppliers(db, suppliers_data, source)
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"批量导入失败: {str(e)}\n详细信息: {error_details}"
+
+
+@tool
+def smart_recommend_products(user_id: str, limit: int = 10) -> str:
+    """
+    基于用户偏好和历史数据智能推荐产品。
+    
+    Args:
+        user_id: 用户ID（必填）
+        limit: 返回推荐数量，默认10个
+    
+    Returns:
+        产品推荐列表的JSON格式字符串
+    """
+    try:
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            products = mgr.recommend_products(db, user_id, limit)
+            
+            products_data = []
+            for prod in products:
+                # 处理JSON字段
+                image_urls = []
+                if prod.image_urls is not None:
+                    try:
+                        image_urls = json.loads(prod.image_urls)
+                    except:
+                        pass
+                
+                tags = []
+                if prod.tags is not None:
+                    try:
+                        tags = json.loads(prod.tags)
+                    except:
+                        pass
+                
+                # 获取供应商信息
+                supplier = mgr.get_supplier_by_id(db, prod.supplier_id)
+                supplier_name = supplier.name if supplier else "未知"
+                supplier_platform = supplier.platform if supplier else ""
+                
+                prod_data = {
+                    "id": prod.id,
+                    "name": prod.name,
+                    "category": prod.category,
+                    "supplier_id": prod.supplier_id,
+                    "supplier_name": supplier_name,
+                    "supplier_platform": supplier_platform,
+                    "purchase_price": prod.purchase_price,
+                    "estimated_price": prod.estimated_price,
+                    "profit_margin": prod.profit_margin,
+                    "roi": prod.roi,
+                    "potential_score": prod.potential_score,
+                    "image_urls": image_urls,
+                    "tags": tags,
+                    "notes": prod.notes
+                }
+                products_data.append(prod_data)
+            
+            result = {
+                "user_id": user_id,
+                "total": len(products_data),
+                "products": products_data
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"智能推荐失败: {str(e)}\n详细信息: {error_details}"
+
+
+@tool
+def generate_trend_chart(category: str = None, platform: str = None, days: int = 30) -> str:
+    """
+    生成市场趋势图表数据（用于数据可视化）。
+    
+    Args:
+        category: 产品品类
+        platform: 平台
+        days: 分析天数，默认30天
+    
+    Returns:
+        趋势图表数据的JSON格式字符串，包含时间序列数据
+    """
+    try:
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            
+            # 获取趋势数据
+            trends = mgr.get_market_trends(db, category, platform, skip=0, limit=days)
+            
+            # 生成图表数据
+            chart_data = {
+                "category": category or "所有品类",
+                "platform": platform or "所有平台",
+                "days": days,
+                "time_series": [],
+                "summary": {
+                    "avg_growth_rate": 0,
+                    "max_growth_rate": 0,
+                    "min_growth_rate": 0,
+                    "total_trends": len(trends)
+                }
+            }
+            
+            growth_rates = []
+            for trend in trends:
+                trend_data = {
+                    "date": trend.data_date.isoformat() if trend.data_date is not None else None,
+                    "growth_rate": trend.growth_rate,
+                    "hot_keywords": json.loads(trend.hot_keywords) if trend.hot_keywords is not None else [],
+                    "summary": trend.summary
+                }
+                chart_data["time_series"].append(trend_data)
+                
+                if trend.growth_rate is not None:
+                    growth_rates.append(trend.growth_rate)
+            
+            # 计算统计数据
+            if growth_rates:
+                chart_data["summary"]["avg_growth_rate"] = round(sum(growth_rates) / len(growth_rates), 2)
+                chart_data["summary"]["max_growth_rate"] = round(max(growth_rates), 2)
+                chart_data["summary"]["min_growth_rate"] = round(min(growth_rates), 2)
+            
+            return json.dumps(chart_data, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"生成趋势图表失败: {str(e)}\n详细信息: {error_details}"
+
+
+@tool
+def get_notifications(user_id: str, is_read: bool = None, limit: int = 20) -> str:
+    """
+    获取用户的通知列表。
+    
+    Args:
+        user_id: 用户ID（必填）
+        is_read: 是否已读（None=全部, True=已读, False=未读）
+        limit: 返回数量限制，默认20条
+    
+    Returns:
+        通知列表的JSON格式字符串
+    """
+    try:
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            notifications = mgr.get_notifications(db, user_id, is_read, skip=0, limit=limit)
+            
+            notifications_data = []
+            for notif in notifications:
+                # 解析附加数据
+                data = {}
+                if notif.data is not None:
+                    try:
+                        data = json.loads(notif.data)
+                    except:
+                        pass
+                
+                notif_data = {
+                    "id": notif.id,
+                    "notification_type": notif.notification_type,
+                    "title": notif.title,
+                    "content": notif.content,
+                    "data": data,
+                    "priority": notif.priority,
+                    "is_read": notif.is_read,
+                    "created_at": notif.created_at.isoformat() if notif.created_at is not None else None,
+                    "read_at": notif.read_at.isoformat() if notif.read_at is not None else None
+                }
+                notifications_data.append(notif_data)
+            
+            result = {
+                "user_id": user_id,
+                "total": len(notifications_data),
+                "notifications": notifications_data
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"获取通知失败: {str(e)}\n详细信息: {error_details}"
+
+
+@tool
+def create_trend_notification(user_id: str, category: str, growth_rate: float,
+                               summary: str, hot_keywords: list = None) -> str:
+    """
+    创建趋势警报通知。
+    
+    Args:
+        user_id: 用户ID（必填）
+        category: 品类
+        growth_rate: 增长率（%）
+        summary: 趋势摘要
+        hot_keywords: 热门关键词列表
+    
+    Returns:
+        通知创建结果的JSON格式字符串
+    """
+    try:
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            notification = mgr.create_trend_alert(
+                db=db,
+                user_id=user_id,
+                category=category,
+                growth_rate=growth_rate,
+                summary=summary,
+                hot_keywords=hot_keywords or []
+            )
+            
+            result = {
+                "success": True,
+                "notification_id": notification.id,
+                "title": notification.title,
+                "priority": notification.priority,
+                "message": "趋势警报通知已创建"
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"创建趋势通知失败: {str(e)}\n详细信息: {error_details}"
+
+
 def build_agent(ctx=None):
     workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
     config_path = os.path.join(workspace_path, LLM_CONFIG)
@@ -759,18 +1308,35 @@ def build_agent(ctx=None):
     
     # 定义工具列表
     tools = [
+        # 搜索工具
         web_search_tool,
         advanced_search_tool,
         image_search_tool,
+        search_1688_tool,
+        search_alibaba_tool,
+        # 分析工具
         roi_calculator_tool,
         competitor_analysis_tool,
         trend_analysis_tool,
         supplier_evaluation_tool,
+        # 数据库工具
         save_supplier_to_db,
         save_product_to_db,
         query_suppliers_from_db,
         save_trend_to_db,
-        query_trends_from_db
+        query_trends_from_db,
+        # 用户偏好工具
+        save_user_preference,
+        get_user_preference,
+        # 批量操作工具
+        batch_import_suppliers,
+        # 智能推荐工具
+        smart_recommend_products,
+        # 可视化工具
+        generate_trend_chart,
+        # 通知工具
+        get_notifications,
+        create_trend_notification
     ]
     
     return create_agent(

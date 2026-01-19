@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 import json
 
-from storage.database.shared.model import Supplier, Product, MarketTrend
+from storage.database.shared.model import Supplier, Product, MarketTrend, UserPreference, Notification
 
 
 # --- Pydantic Models ---
@@ -368,3 +368,205 @@ class SupplierManager:
         db.delete(db_trend)
         db.commit()
         return True
+
+    # ========== User Preference Operations ==========
+    def get_user_preference(self, db: Session, user_id: str) -> Optional[UserPreference]:
+        """获取用户偏好设置"""
+        return db.query(UserPreference).filter(UserPreference.user_id == user_id).first()
+
+    def create_or_update_preference(self, db: Session, user_id: str,
+                                    preferred_categories: Optional[List[str]] = None,
+                                    min_price: Optional[float] = None,
+                                    max_price: Optional[float] = None,
+                                    preferred_platforms: Optional[List[str]] = None,
+                                    preferred_regions: Optional[List[str]] = None,
+                                    min_roi: Optional[float] = None,
+                                    min_profit_margin: Optional[float] = None,
+                                    keywords: Optional[List[str]] = None,
+                                    exclude_keywords: Optional[List[str]] = None,
+                                    notification_enabled: Optional[bool] = None) -> UserPreference:
+        """创建或更新用户偏好设置"""
+        pref = self.get_user_preference(db, user_id)
+        
+        if pref:
+            # 更新现有偏好
+            if preferred_categories is not None:
+                pref.categories = json.dumps(preferred_categories, ensure_ascii=False)
+            if min_price is not None:
+                pref.min_price = min_price
+            if max_price is not None:
+                pref.max_price = max_price
+            if preferred_platforms is not None:
+                pref.platforms = json.dumps(preferred_platforms, ensure_ascii=False)
+            if preferred_regions is not None:
+                pref.regions = json.dumps(preferred_regions, ensure_ascii=False)
+            if min_roi is not None:
+                pref.min_roi = min_roi
+            if min_profit_margin is not None:
+                pref.min_profit_margin = min_profit_margin
+            if keywords is not None:
+                pref.keywords = json.dumps(keywords, ensure_ascii=False)
+            if exclude_keywords is not None:
+                pref.exclude_keywords = json.dumps(exclude_keywords, ensure_ascii=False)
+            if notification_enabled is not None:
+                pref.notification_enabled = notification_enabled
+        else:
+            # 创建新偏好
+            pref = UserPreference(
+                user_id=user_id,
+                preferred_categories=json.dumps(preferred_categories or [], ensure_ascii=False),
+                min_price=min_price,
+                max_price=max_price,
+                preferred_platforms=json.dumps(preferred_platforms or [], ensure_ascii=False),
+                preferred_regions=json.dumps(preferred_regions or [], ensure_ascii=False),
+                min_roi=min_roi,
+                min_profit_margin=min_profit_margin,
+                keywords=json.dumps(keywords or [], ensure_ascii=False),
+                exclude_keywords=json.dumps(exclude_keywords or [], ensure_ascii=False),
+                notification_enabled=notification_enabled if notification_enabled is not None else True
+            )
+            db.add(pref)
+        
+        db.commit()
+        db.refresh(pref)
+        return pref
+
+    # ========== Notification Operations ==========
+    def create_notification(self, db: Session, user_id: str, notification_type: str,
+                            title: str, content: str, data: Optional[Dict[str, Any]] = None,
+                            priority: str = "normal") -> Notification:
+        """创建通知"""
+        notification = Notification(
+            user_id=user_id,
+            notification_type=notification_type,
+            title=title,
+            content=content,
+            data=json.dumps(data or {}, ensure_ascii=False),
+            priority=priority
+        )
+        db.add(notification)
+        db.commit()
+        db.refresh(notification)
+        return notification
+
+    def get_notifications(self, db: Session, user_id: str, is_read: Optional[bool] = None,
+                          skip: int = 0, limit: int = 20) -> List[Notification]:
+        """获取用户通知列表"""
+        query = db.query(Notification).filter(Notification.user_id == user_id)
+        if is_read is not None:
+            query = query.filter(Notification.is_read == is_read)
+        return query.order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
+
+    def mark_notification_read(self, db: Session, notification_id: int) -> bool:
+        """标记通知为已读"""
+        notification = db.query(Notification).filter(Notification.id == notification_id).first()
+        if not notification:
+            return False
+        notification.is_read = True
+        notification.read_at = datetime.now()
+        db.commit()
+        return True
+
+    def create_trend_alert(self, db: Session, user_id: str, category: str,
+                           growth_rate: float, summary: str, hot_keywords: List[str]) -> Notification:
+        """创建趋势警报通知"""
+        data = {
+            "category": category,
+            "growth_rate": growth_rate,
+            "hot_keywords": hot_keywords
+        }
+        
+        priority = "high" if growth_rate > 50 else "urgent" if growth_rate > 100 else "normal"
+        
+        title = f"趋势警报：{category} 增长率 {growth_rate}%"
+        content = f"{category} 品类出现高增长趋势（增长率 {growth_rate}%）\n\n摘要：{summary}\n\n热门关键词：{', '.join(hot_keywords)}"
+        
+        return self.create_notification(db, user_id, "trend_alert", title, content, data, priority)
+
+    # ========== Smart Recommendation Operations ==========
+    def recommend_products(self, db: Session, user_id: str, limit: int = 10) -> List[Product]:
+        """基于用户偏好推荐产品"""
+        pref = self.get_user_preference(db, user_id)
+        if not pref:
+            # 无偏好设置，返回潜力分最高的产品
+            return db.query(Product).filter(
+                Product.status == 'active',
+                Product.potential_score >= 7
+            ).order_by(Product.potential_score.desc()).limit(limit).all()
+        
+        query = db.query(Product).filter(Product.status == 'active')
+        
+        # 解析偏好
+        categories = []
+        if pref.preferred_categories is not None:
+            try:
+                categories = json.loads(pref.preferred_categories)
+            except:
+                pass
+        
+        if categories:
+            query = query.filter(Product.category.in_(categories))
+        
+        if pref.min_price:
+            query = query.filter(Product.purchase_price >= pref.min_price)
+        
+        if pref.max_price:
+            query = query.filter(Product.purchase_price <= pref.max_price)
+        
+        if pref.min_roi:
+            query = query.filter(Product.roi >= pref.min_roi)
+        
+        if pref.min_profit_margin:
+            query = query.filter(Product.profit_margin >= pref.min_profit_margin)
+        
+        # 按潜力分数和ROI排序
+        return query.order_by(
+            Product.potential_score.desc(),
+            Product.roi.desc()
+        ).limit(limit).all()
+
+    # ========== Batch Import Operations ==========
+    def batch_import_suppliers(self, db: Session, suppliers_data: List[Dict[str, Any]],
+                                source: str = "batch_import") -> Dict[str, Any]:
+        """批量导入供应商数据"""
+        success_count = 0
+        failed_count = 0
+        failed_items = []
+        
+        for idx, item in enumerate(suppliers_data):
+            try:
+                supplier_in = SupplierCreate(
+                    name=item.get('name', f'供应商_{idx}'),
+                    company_name=item.get('company_name'),
+                    contact_person=item.get('contact_person'),
+                    contact_phone=item.get('contact_phone'),
+                    contact_email=item.get('contact_email'),
+                    wechat_id=item.get('wechat_id'),
+                    region=item.get('region'),
+                    address=item.get('address'),
+                    platform=item.get('platform'),
+                    platform_url=item.get('platform_url'),
+                    min_order_quantity=item.get('min_order_quantity'),
+                    is_verified=item.get('is_verified', False),
+                    rating=item.get('rating'),
+                    categories=item.get('categories', []),
+                    tags=item.get('tags', []),
+                    notes=item.get('notes'),
+                    source=source
+                )
+                self.create_supplier(db, supplier_in)
+                success_count += 1
+            except Exception as e:
+                failed_count += 1
+                failed_items.append({
+                    "index": idx,
+                    "data": item,
+                    "error": str(e)
+                })
+        
+        return {
+            "total": len(suppliers_data),
+            "success": success_count,
+            "failed": failed_count,
+            "failed_items": failed_items
+        }

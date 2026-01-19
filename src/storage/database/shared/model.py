@@ -93,3 +93,48 @@ class MarketTrend(Base):
         Index("ix_market_trends_category_date", "category", "data_date"),
     )
 
+
+class UserPreference(Base):
+    """用户偏好表，存储用户的品类和价格偏好"""
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="偏好ID")
+    user_id = Column(String(100), nullable=False, index=True, comment="用户ID")
+    preferred_categories = Column(JSON, nullable=True, comment="偏好品类列表")
+    min_price = Column(Float, nullable=True, comment="最低进货价")
+    max_price = Column(Float, nullable=True, comment="最高进货价")
+    preferred_platforms = Column(JSON, nullable=True, comment="偏好平台列表")
+    preferred_regions = Column(JSON, nullable=True, comment="偏好地区列表")
+    min_roi = Column(Float, nullable=True, comment="最低ROI要求（%）")
+    min_profit_margin = Column(Float, nullable=True, comment="最低利润率要求（%）")
+    keywords = Column(JSON, nullable=True, comment="关注关键词列表")
+    exclude_keywords = Column(JSON, nullable=True, comment="排除关键词列表")
+    notification_enabled = Column(Boolean, default=True, nullable=False, comment="是否启用通知")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True, comment="更新时间")
+
+    __table_args__ = (
+        Index("ix_user_preferences_user_id", "user_id"),
+    )
+
+
+class Notification(Base):
+    """通知表，存储系统通知消息"""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="通知ID")
+    user_id = Column(String(100), nullable=False, index=True, comment="用户ID")
+    notification_type = Column(String(50), nullable=False, comment="通知类型：trend_alert/supplier_alert/recommendation")
+    title = Column(String(255), nullable=False, comment="通知标题")
+    content = Column(Text, nullable=False, comment="通知内容")
+    data = Column(JSON, nullable=True, comment="附加数据")
+    priority = Column(String(20), default="normal", nullable=False, comment="优先级：low/normal/high/urgent")
+    is_read = Column(Boolean, default=False, nullable=False, comment="是否已读")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="创建时间")
+    read_at = Column(DateTime(timezone=True), nullable=True, comment="阅读时间")
+
+    __table_args__ = (
+        Index("ix_notifications_user_id_read", "user_id", "is_read"),
+        Index("ix_notifications_user_id_created", "user_id", "created_at"),
+    )
+
