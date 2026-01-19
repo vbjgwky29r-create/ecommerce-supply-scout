@@ -8,7 +8,7 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import AnyMessage
 from langchain.tools import tool, ToolRuntime
 from coze_coding_utils.runtime_ctx.context import default_headers, new_context
-from coze_coding_dev_sdk import SearchClient, get_session
+from coze_coding_dev_sdk import SearchClient, LLMClient, get_session
 from storage.memory.memory_saver import get_memory_saver
 from storage.database.db import execute_with_retry
 from storage.database.supplier_manager import (
@@ -184,6 +184,137 @@ def image_search_tool(query: str, count: int = 10) -> str:
         import traceback
         error_details = traceback.format_exc()
         return f"图片搜索失败: {str(e)}\n详细信息: {error_details}"
+
+@tool
+def image_analysis_tool(image_url: str, analysis_type: str = "general") -> str:
+    """
+    分析产品图片，识别产品类型、特征、风格等信息，并基于图片内容进行市场分析和货源推荐。
+    
+    Args:
+        image_url: 产品图片URL，可以是网络图片URL或本地图片路径
+        analysis_type: 分析类型，可选值：
+            - "general": 通用分析（识别产品类型、特征、风格）
+            - "product": 产品分析（识别产品细节、材质、功能）
+            - "market": 市场分析（基于图片推荐类似产品和市场趋势）
+            - "sourcing": 货源分析（基于图片推荐供应商和采购建议）
+    
+    Returns:
+        图片分析结果的JSON格式字符串，包含产品识别、特征分析、市场建议等信息
+    """
+    try:
+        from langchain_core.messages import SystemMessage, HumanMessage
+        
+        # 创建 context
+        ctx = new_context(method="image_analysis")
+        
+        # 创建 LLM 客户端，使用视觉模型
+        llm_client = LLMClient(ctx=ctx)
+        
+        # 根据分析类型设置不同的提示词
+        system_prompts = {
+            "general": """你是电商产品视觉分析专家。请详细分析用户上传的产品图片，包括：
+1. 产品类型识别（这是什么产品？属于哪个品类？）
+2. 产品特征描述（颜色、材质、设计风格、尺寸等）
+3. 目标用户群体分析
+4. 市场定位判断（高端/中端/平价）
+5. 潜在竞争优势和劣势
+
+请以结构化的JSON格式返回分析结果。""",
+            
+            "product": """你是电商产品细节分析专家。请深入分析用户上传的产品图片，包括：
+1. 产品名称和品类
+2. 详细规格参数（尺寸、重量、材质等）
+3. 产品功能和卖点
+4. 包装方式
+5. 生产工艺特点
+6. 质量评估
+7. 预估成本和利润空间
+
+请以结构化的JSON格式返回分析结果。""",
+            
+            "market": """你是电商市场趋势分析专家。请基于用户上传的产品图片进行市场分析，包括：
+1. 产品品类和细分市场
+2. 当前市场热度（高/中/低）
+3. 目标平台建议（淘宝/拼多多/京东等）
+4. 竞争程度评估
+5. 市场机会点
+6. 价格区间建议
+7. 推广渠道建议
+8. 热销关键词推荐
+
+请以结构化的JSON格式返回分析结果。""",
+            
+            "sourcing": """你是电商货源推荐专家。请基于用户上传的产品图片进行货源分析，包括：
+1. 产品品类和规格
+2. 推荐采购渠道（1688/阿里巴巴/批发市场等）
+3. 预估进货价格区间
+4. 最小起订量建议
+5. 供应商选择要点
+6. 质量控制建议
+7. 利润率预估
+8. 风险提示
+
+请以结构化的JSON格式返回分析结果。"""
+        }
+        
+        system_prompt = system_prompts.get(analysis_type, system_prompts["general"])
+        
+        # 构建消息
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=[
+                {
+                    "type": "text",
+                    "text": "请详细分析这张产品图片，并按照上述要求返回结构化的JSON格式结果。"
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": image_url
+                    }
+                }
+            ])
+        ]
+        
+        # 调用视觉模型
+        response = llm_client.invoke(
+            messages=messages,
+            model="doubao-seed-1-6-vision-250815",
+            temperature=0.7,
+            max_completion_tokens=4096
+        )
+        
+        # 安全地提取响应内容
+        def get_text_content(content):
+            """安全地从 AIMessage content 中提取文本"""
+            if isinstance(content, str):
+                return content
+            elif isinstance(content, list):
+                text_parts = []
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text_parts.append(item.get("text", ""))
+                return " ".join(text_parts)
+            else:
+                return str(content)
+        
+        analysis_text = get_text_content(response.content)
+        
+        # 构建输出结果
+        output = {
+            "analysis_type": analysis_type,
+            "image_url": image_url,
+            "analysis_result": analysis_text,
+            "model": "doubao-seed-1-6-vision-250815",
+            "timestamp": "当前时间"
+        }
+        
+        return json.dumps(output, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"图片分析失败: {str(e)}\n详细信息: {error_details}"
 
 @tool
 def roi_calculator_tool(purchase_price: float, selling_price: float, logistics_cost: float = 0, 
@@ -1434,6 +1565,7 @@ def build_agent(ctx=None):
         web_search_tool,
         advanced_search_tool,
         image_search_tool,
+        image_analysis_tool,
         search_1688_tool,
         search_alibaba_tool,
         # 分析工具
