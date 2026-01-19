@@ -8,8 +8,13 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import AnyMessage
 from langchain.tools import tool, ToolRuntime
 from coze_coding_utils.runtime_ctx.context import default_headers, new_context
-from coze_coding_dev_sdk import SearchClient
+from coze_coding_dev_sdk import SearchClient, get_session
 from storage.memory.memory_saver import get_memory_saver
+from storage.database.supplier_manager import (
+    SupplierManager, SupplierCreate, ProductCreate, 
+    ProductUpdate, MarketTrendCreate
+)
+from storage.database.shared.model import Supplier, Product, MarketTrend
 
 LLM_CONFIG = "config/agent_llm_config.json"
 
@@ -411,6 +416,322 @@ def supplier_evaluation_tool(category: str, region: str = None, min_price: float
         error_details = traceback.format_exc()
         return f"供应商评估失败: {str(e)}\n详细信息: {error_details}"
 
+@tool
+def save_supplier_to_db(name: str, company_name: str = None, contact_person: str = None,
+                        contact_phone: str = None, region: str = None, platform: str = None,
+                        platform_url: str = None, min_order_quantity: int = None,
+                        is_verified: bool = False, rating: float = None,
+                        categories: list = None, tags: list = None, notes: str = None) -> str:
+    """
+    将供应商信息保存到数据库。
+    
+    Args:
+        name: 供应商名称（必填）
+        company_name: 公司名称
+        contact_person: 联系人
+        contact_phone: 联系电话
+        region: 所在地区
+        platform: 主要平台（如1688、阿里巴巴等）
+        platform_url: 平台店铺URL
+        min_order_quantity: 最小起订量
+        is_verified: 是否为认证供应商
+        rating: 评分（0-5分）
+        categories: 经营的品类列表
+        tags: 标签列表
+        notes: 备注信息
+    
+    Returns:
+        保存结果的JSON格式字符串
+    """
+    try:
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            supplier_in = SupplierCreate(
+                name=name,
+                company_name=company_name,
+                contact_person=contact_person,
+                contact_phone=contact_phone,
+                region=region,
+                platform=platform,
+                platform_url=platform_url,
+                min_order_quantity=min_order_quantity,
+                is_verified=is_verified,
+                rating=rating,
+                categories=categories or [],
+                tags=tags or [],
+                notes=notes,
+                source="智能体搜索"
+            )
+            supplier = mgr.create_supplier(db, supplier_in)
+            
+            result = {
+                "success": True,
+                "supplier_id": supplier.id,
+                "message": f"供应商'{name}'已成功保存到数据库"
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"保存供应商失败: {str(e)}\n详细信息: {error_details}"
+
+@tool
+def save_product_to_db(supplier_id: int, name: str, category: str = None,
+                       purchase_price: float = None, estimated_price: float = None,
+                       logistics_cost: float = 0, min_order_quantity: int = None,
+                       potential_score: int = None, image_urls: list = None,
+                       product_url: str = None, notes: str = None) -> str:
+    """
+    将产品信息保存到数据库。
+    
+    Args:
+        supplier_id: 供应商ID（必填）
+        name: 产品名称（必填）
+        category: 产品品类
+        purchase_price: 进货价
+        estimated_price: 预估销售价
+        logistics_cost: 物流费用
+        min_order_quantity: 最小起订量
+        potential_score: 潜力分数（1-10分）
+        image_urls: 产品图片URL列表
+        product_url: 产品链接
+        notes: 备注
+    
+    Returns:
+        保存结果的JSON格式字符串
+    """
+    try:
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            product_in = ProductCreate(
+                supplier_id=supplier_id,
+                name=name,
+                category=category,
+                purchase_price=purchase_price,
+                estimated_price=estimated_price,
+                logistics_cost=logistics_cost,
+                min_order_quantity=min_order_quantity,
+                potential_score=potential_score,
+                image_urls=image_urls or [],
+                product_url=product_url,
+                notes=notes
+            )
+            product = mgr.create_product(db, product_in)
+            
+            result = {
+                "success": True,
+                "product_id": product.id,
+                "supplier_id": supplier_id,
+                "profit_margin": product.profit_margin,
+                "roi": product.roi,
+                "message": f"产品'{name}'已成功保存到数据库"
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"保存产品失败: {str(e)}\n详细信息: {error_details}"
+
+@tool
+def query_suppliers_from_db(category: str = None, region: str = None, platform: str = None,
+                            min_price: float = None, max_price: float = None,
+                            limit: int = 20) -> str:
+    """
+    从数据库查询供应商信息。
+    
+    Args:
+        category: 产品品类
+        region: 地区
+        platform: 平台
+        min_price: 最低价格
+        max_price: 最高价格
+        limit: 返回数量限制，默认20
+    
+    Returns:
+        查询结果的JSON格式字符串
+    """
+    try:
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            suppliers = mgr.search_suppliers(
+                db=db,
+                category=category,
+                region=region,
+                platform=platform,
+                min_price=min_price,
+                max_price=max_price,
+                skip=0,
+                limit=limit
+            )
+            
+            suppliers_data = []
+            for sup in suppliers:
+                # 处理JSON字段
+                categories_data = []
+                if sup.categories is not None:
+                    try:
+                        categories_data = json.loads(sup.categories)
+                    except:
+                        categories_data = []
+                
+                tags_data = []
+                if sup.tags is not None:
+                    try:
+                        tags_data = json.loads(sup.tags)
+                    except:
+                        tags_data = []
+                
+                sup_data = {
+                    "id": sup.id,
+                    "name": sup.name,
+                    "company_name": sup.company_name,
+                    "contact_person": sup.contact_person,
+                    "contact_phone": sup.contact_phone,
+                    "region": sup.region,
+                    "platform": sup.platform,
+                    "platform_url": sup.platform_url,
+                    "min_order_quantity": sup.min_order_quantity,
+                    "is_verified": sup.is_verified,
+                    "rating": sup.rating,
+                    "categories": categories_data,
+                    "tags": tags_data,
+                    "status": sup.status
+                }
+                suppliers_data.append(sup_data)
+            
+            result = {
+                "total": len(suppliers_data),
+                "suppliers": suppliers_data
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"查询供应商失败: {str(e)}\n详细信息: {error_details}"
+
+@tool
+def save_trend_to_db(category: str, platform: str = None, growth_rate: float = None,
+                     hot_keywords: list = None, summary: str = None,
+                     trend_type: str = "monthly") -> str:
+    """
+    将市场趋势数据保存到数据库。
+    
+    Args:
+        category: 品类（必填）
+        platform: 平台
+        growth_rate: 增长率（%）
+        hot_keywords: 热门关键词列表
+        summary: 趋势摘要
+        trend_type: 趋势类型（monthly/weekly/daily）
+    
+    Returns:
+        保存结果的JSON格式字符串
+    """
+    try:
+        from datetime import datetime
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            trend_in = MarketTrendCreate(
+                category=category,
+                platform=platform,
+                growth_rate=growth_rate,
+                hot_keywords=hot_keywords or [],
+                summary=summary,
+                trend_type=trend_type,
+                data_date=datetime.now()
+            )
+            trend = mgr.create_market_trend(db, trend_in)
+            
+            result = {
+                "success": True,
+                "trend_id": trend.id,
+                "message": f"趋势数据'{category}'已成功保存到数据库"
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"保存趋势数据失败: {str(e)}\n详细信息: {error_details}"
+
+@tool
+def query_trends_from_db(category: str = None, platform: str = None, limit: int = 10) -> str:
+    """
+    从数据库查询市场趋势数据。
+    
+    Args:
+        category: 品类
+        platform: 平台
+        limit: 返回数量限制，默认10
+    
+    Returns:
+        查询结果的JSON格式字符串
+    """
+    try:
+        db = get_session()
+        try:
+            mgr = SupplierManager()
+            trends = mgr.get_market_trends(
+                db=db,
+                category=category,
+                platform=platform,
+                skip=0,
+                limit=limit
+            )
+            
+            trends_data = []
+            for trend in trends:
+                # 处理JSON字段
+                hot_keywords_data = []
+                if trend.hot_keywords is not None:
+                    try:
+                        hot_keywords_data = json.loads(trend.hot_keywords)
+                    except:
+                        hot_keywords_data = []
+                
+                # 处理日期字段
+                data_date_str = None
+                if trend.data_date is not None:
+                    try:
+                        data_date_str = trend.data_date.isoformat()
+                    except:
+                        data_date_str = None
+                
+                trend_data = {
+                    "id": trend.id,
+                    "category": trend.category,
+                    "platform": trend.platform,
+                    "growth_rate": trend.growth_rate,
+                    "hot_keywords": hot_keywords_data,
+                    "summary": trend.summary,
+                    "trend_type": trend.trend_type,
+                    "data_date": data_date_str
+                }
+                trends_data.append(trend_data)
+            
+            result = {
+                "total": len(trends_data),
+                "trends": trends_data
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f"查询趋势数据失败: {str(e)}\n详细信息: {error_details}"
+
 def build_agent(ctx=None):
     workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
     config_path = os.path.join(workspace_path, LLM_CONFIG)
@@ -444,7 +765,12 @@ def build_agent(ctx=None):
         roi_calculator_tool,
         competitor_analysis_tool,
         trend_analysis_tool,
-        supplier_evaluation_tool
+        supplier_evaluation_tool,
+        save_supplier_to_db,
+        save_product_to_db,
+        query_suppliers_from_db,
+        save_trend_to_db,
+        query_trends_from_db
     ]
     
     return create_agent(
