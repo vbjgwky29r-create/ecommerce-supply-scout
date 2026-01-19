@@ -243,53 +243,74 @@ def roi_calculator_tool(purchase_price: float, selling_price: float, logistics_c
 def competitor_analysis_tool(category: str, platform: str = "淘宝") -> str:
     """
     分析指定品类在特定平台上的竞争情况。
-    
+
     Args:
         category: 产品品类，如"面膜"、"手机壳"等
         platform: 目标平台，默认"淘宝"，可选"拼多多"、"京东"等
-    
+
     Returns:
         竞品分析结果的JSON格式字符串
     """
     try:
-        # 构建搜索关键词
-        search_query = f"{platform} {category} 销量排行 竞品分析"
-        
-        # 使用网络搜索获取竞品信息
-        ctx = new_context(method="search.competitor")
-        client = SearchClient(ctx=ctx)
-        
-        response = client.web_search(
-            query=search_query,
-            count=15,
-            need_summary=True
-        )
-        
-        # 分析搜索结果
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+
+        # 设置超时时间
+        SEARCH_TIMEOUT = 12
+
+        def search_competitors():
+            # 构建搜索关键词
+            search_query = f"{platform} {category} 销量排行"
+
+            # 使用网络搜索获取竞品信息
+            ctx = new_context(method="search.competitor")
+            client = SearchClient(ctx=ctx)
+
+            response = client.web_search(
+                query=search_query,
+                count=10,  # 减少结果数量
+                need_summary=True
+            )
+            return response
+
+        # 带超时的搜索
         competitors = []
-        if response.web_items:
-            for item in response.web_items:
-                competitor = {
-                    "title": item.title,
-                    "url": item.url,
-                    "site_name": item.site_name,
-                    "snippet": item.snippet
-                }
-                competitors.append(competitor)
-        
+        ai_summary = ""
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(search_competitors)
+                response = future.result(timeout=SEARCH_TIMEOUT)
+
+                # 分析搜索结果
+                if response.web_items:
+                    for item in response.web_items[:8]:  # 只取前8个
+                        competitor = {
+                            "title": item.title,
+                            "url": item.url,
+                            "site_name": item.site_name,
+                            "snippet": item.snippet
+                        }
+                        competitors.append(competitor)
+
+                ai_summary = response.summary if hasattr(response, 'summary') else ""
+        except FutureTimeoutError:
+            ai_summary = "搜索超时，仅返回部分结果"
+        except Exception as e:
+            ai_summary = f"搜索出错: {str(e)}"
+
         # 综合分析
         analysis = {
             "category": category,
             "platform": platform,
             "competitor_count": len(competitors),
-            "market_saturation": "高" if len(competitors) > 10 else "中" if len(competitors) > 5 else "低",
-            "ai_summary": response.summary if hasattr(response, 'summary') else "",
+            "market_saturation": "高" if len(competitors) > 8 else "中" if len(competitors) > 4 else "低",
+            "ai_summary": ai_summary,
             "competitors": competitors,
             "analysis_time": "当前"
         }
-        
+
         return json.dumps(analysis, ensure_ascii=False, indent=2)
-        
+
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
@@ -299,119 +320,161 @@ def competitor_analysis_tool(category: str, platform: str = "淘宝") -> str:
 def trend_analysis_tool(category: str, time_range: str = "1m") -> str:
     """
     分析指定品类的市场趋势和热销关键词。
-    
+
     Args:
         category: 产品品类，如"面膜"、"手机壳"等
         time_range: 时间范围，如"1w"(1周)、"1m"(1个月)、"3m"(3个月)，默认"1m"
-    
+
     Returns:
         趋势分析结果的JSON格式字符串
     """
     try:
-        # 构建搜索关键词
-        search_query = f"{category} 热销趋势 增长率 市场分析"
-        
-        # 使用网络搜索获取趋势信息
-        ctx = new_context(method="search.trend")
-        client = SearchClient(ctx=ctx)
-        
-        response = client.search(
-            query=search_query,
-            search_type="web_summary",
-            count=10,
-            time_range=time_range,
-            need_summary=True
-        )
-        
-        # 提取趋势信息
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+
+        # 设置超时时间
+        SEARCH_TIMEOUT = 12
+
+        def search_trends():
+            # 构建搜索关键词
+            search_query = f"{category} 热销趋势 增长率"
+
+            # 使用网络搜索获取趋势信息
+            ctx = new_context(method="search.trend")
+            client = SearchClient(ctx=ctx)
+
+            response = client.search(
+                query=search_query,
+                search_type="web_summary",
+                count=8,  # 减少结果数量
+                time_range=time_range,
+                need_summary=True
+            )
+            return response
+
+        # 带超时的搜索
         results = []
-        if response.web_items:
-            for item in response.web_items:
-                trend_item = {
-                    "title": item.title,
-                    "url": item.url,
-                    "site_name": item.site_name,
-                    "snippet": item.snippet,
-                    "publish_time": item.publish_time if hasattr(item, 'publish_time') else ""
-                }
-                results.append(trend_item)
-        
+        trend_summary = ""
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(search_trends)
+                response = future.result(timeout=SEARCH_TIMEOUT)
+
+                # 提取趋势信息
+                if response.web_items:
+                    for item in response.web_items[:6]:  # 只取前6个
+                        trend_item = {
+                            "title": item.title,
+                            "url": item.url,
+                            "site_name": item.site_name,
+                            "snippet": item.snippet,
+                            "publish_time": item.publish_time if hasattr(item, 'publish_time') else ""
+                        }
+                        results.append(trend_item)
+
+                trend_summary = response.summary if hasattr(response, 'summary') else ""
+        except FutureTimeoutError:
+            trend_summary = "搜索超时，仅返回部分结果"
+        except Exception as e:
+            trend_summary = f"搜索出错: {str(e)}"
+
         # 综合趋势分析
         trend_analysis = {
             "category": category,
             "time_range": time_range,
-            "trend_summary": response.summary if hasattr(response, 'summary') else "",
+            "trend_summary": trend_summary,
             "trend_data_count": len(results),
             "trend_results": results
         }
-        
+
         return json.dumps(trend_analysis, ensure_ascii=False, indent=2)
-        
+
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
         return f"趋势分析失败: {str(e)}\n详细信息: {error_details}"
 
 @tool
-def supplier_evaluation_tool(category: str, region: str = None, min_price: float = None, 
+def supplier_evaluation_tool(category: str, region: str = None, min_price: float = None,
                             max_price: float = None) -> str:
     """
     评估和推荐供应商，基于品类、地区和价格范围。
-    
+
     Args:
         category: 产品品类
         region: 地区偏好，如"广州"、"浙江"、"义乌"等，可选
         min_price: 最低进货价，可选
         max_price: 最高进货价，可选
-    
+
     Returns:
         供应商评估结果的JSON格式字符串
     """
     try:
-        # 构建搜索关键词
-        search_parts = [category, "供应商", "批发"]
-        if region:
-            search_parts.append(region)
-        if min_price and max_price:
-            search_parts.append(f"价格{min_price}-{max_price}")
-        
-        search_query = " ".join(search_parts)
-        
-        # 使用网络搜索获取供应商信息
-        ctx = new_context(method="search.supplier")
-        client = SearchClient(ctx=ctx)
-        
-        response = client.web_search(
-            query=search_query,
-            count=15,
-            need_summary=True
-        )
-        
-        # 提取供应商信息
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+
+        # 设置超时时间
+        SEARCH_TIMEOUT = 12
+
+        def search_suppliers():
+            # 构建搜索关键词
+            search_parts = [category, "供应商", "批发"]
+            if region:
+                search_parts.append(region)
+            if min_price and max_price:
+                search_parts.append(f"价格{min_price}-{max_price}")
+
+            search_query = " ".join(search_parts)
+
+            # 使用网络搜索获取供应商信息
+            ctx = new_context(method="search.supplier")
+            client = SearchClient(ctx=ctx)
+
+            response = client.web_search(
+                query=search_query,
+                count=10,  # 减少结果数量
+                need_summary=True
+            )
+            return response
+
+        # 带超时的搜索
         suppliers = []
-        if response.web_items:
-            for item in response.web_items:
-                supplier = {
-                    "title": item.title,
-                    "url": item.url,
-                    "site_name": item.site_name,
-                    "snippet": item.snippet,
-                    "summary": item.summary if hasattr(item, 'summary') else ""
-                }
-                suppliers.append(supplier)
-        
+        evaluation_summary = ""
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(search_suppliers)
+                response = future.result(timeout=SEARCH_TIMEOUT)
+
+                # 提取供应商信息
+                if response.web_items:
+                    for item in response.web_items[:8]:  # 只取前8个
+                        supplier = {
+                            "title": item.title,
+                            "url": item.url,
+                            "site_name": item.site_name,
+                            "snippet": item.snippet,
+                            "summary": item.summary if hasattr(item, 'summary') else ""
+                        }
+                        suppliers.append(supplier)
+
+                evaluation_summary = response.summary if hasattr(response, 'summary') else ""
+        except FutureTimeoutError:
+            evaluation_summary = "搜索超时，仅返回部分结果"
+        except Exception as e:
+            evaluation_summary = f"搜索出错: {str(e)}"
+
         # 供应商评估
         evaluation = {
             "category": category,
             "region": region or "全国",
             "price_range": f"{min_price}-{max_price}" if min_price and max_price else "不限",
             "supplier_count": len(suppliers),
-            "evaluation_summary": response.summary if hasattr(response, 'summary') else "",
+            "evaluation_summary": evaluation_summary,
             "suppliers": suppliers
         }
-        
+
         return json.dumps(evaluation, ensure_ascii=False, indent=2)
-        
+
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
@@ -748,61 +811,85 @@ def search_1688_tool(keyword: str, category: str = None, min_price: float = None
                       max_price: float = None, count: int = 10) -> str:
     """
     在1688平台上搜索供应商和产品信息。
-    
+
     Args:
         keyword: 搜索关键词，如"面膜"、"手机壳"等
         category: 产品品类，用于更精确的搜索
         min_price: 最低进货价
         max_price: 最高进货价
-        count: 返回结果数量，默认10条
-    
+        count: 返回结果数量，默认10条，最大20条
+
     Returns:
         1688搜索结果的JSON格式字符串
     """
     try:
-        # 构建搜索查询
-        search_parts = ["1688", keyword]
-        if category:
-            search_parts.append(category)
-        if min_price and max_price:
-            search_parts.append(f"价格{min_price}-{max_price}")
-        search_parts.append("批发")
-        
-        search_query = " ".join(search_parts)
-        
-        ctx = new_context(method="search.1688")
-        client = SearchClient(ctx=ctx)
-        
-        response = client.search(
-            query=search_query,
-            search_type="web_summary",
-            count=count,
-            sites="1688.com",
-            need_summary=True
-        )
-        
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+
+        # 限制返回结果数量
+        count = min(count, 20)
+
+        # 设置超时时间
+        SEARCH_TIMEOUT = 12
+
+        def search_1688():
+            # 构建搜索查询
+            search_parts = ["1688", keyword]
+            if category:
+                search_parts.append(category)
+            if min_price and max_price:
+                search_parts.append(f"价格{min_price}-{max_price}")
+            search_parts.append("批发")
+
+            search_query = " ".join(search_parts)
+
+            ctx = new_context(method="search.1688")
+            client = SearchClient(ctx=ctx)
+
+            response = client.search(
+                query=search_query,
+                search_type="web_summary",
+                count=count,
+                sites="1688.com",
+                need_summary=True
+            )
+            return response
+
+        # 带超时的搜索
         results = []
-        if response.web_items:
-            for item in response.web_items:
-                result = {
-                    "title": item.title,
-                    "url": item.url,
-                    "snippet": item.snippet,
-                    "site_name": item.site_name,
-                    "summary": item.summary if hasattr(item, 'summary') else ""
-                }
-                results.append(result)
-        
+        ai_summary = ""
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(search_1688)
+                response = future.result(timeout=SEARCH_TIMEOUT)
+
+                if response.web_items:
+                    for item in response.web_items:
+                        result = {
+                            "title": item.title,
+                            "url": item.url,
+                            "snippet": item.snippet,
+                            "site_name": item.site_name,
+                            "summary": item.summary if hasattr(item, 'summary') else ""
+                        }
+                        results.append(result)
+
+                ai_summary = response.summary if hasattr(response, 'summary') else ""
+        except FutureTimeoutError:
+            ai_summary = "搜索超时，仅返回部分结果"
+        except Exception as e:
+            ai_summary = f"搜索出错: {str(e)}"
+
         output = {
             "platform": "1688",
             "keyword": keyword,
             "total_results": len(results),
-            "ai_summary": response.summary if hasattr(response, 'summary') else "",
+            "ai_summary": ai_summary,
             "results": results
         }
-        
+
         return json.dumps(output, ensure_ascii=False, indent=2)
-        
+
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
@@ -814,60 +901,84 @@ def search_alibaba_tool(keyword: str, category: str = None, min_price: float = N
                         max_price: float = None, count: int = 10) -> str:
     """
     在阿里巴巴国际站上搜索供应商和产品信息。
-    
+
     Args:
         keyword: 搜索关键词
         category: 产品品类
         min_price: 最低进货价
         max_price: 最高进货价
-        count: 返回结果数量，默认10条
-    
+        count: 返回结果数量，默认10条，最大20条
+
     Returns:
         阿里巴巴搜索结果的JSON格式字符串
     """
     try:
-        search_parts = ["alibaba", keyword]
-        if category:
-            search_parts.append(category)
-        if min_price and max_price:
-            search_parts.append(f"price{min_price}-{max_price}")
-        search_parts.append("wholesale")
-        
-        search_query = " ".join(search_parts)
-        
-        ctx = new_context(method="search.alibaba")
-        client = SearchClient(ctx=ctx)
-        
-        response = client.search(
-            query=search_query,
-            search_type="web_summary",
-            count=count,
-            sites="alibaba.com",
-            need_summary=True
-        )
-        
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+
+        # 限制返回结果数量
+        count = min(count, 20)
+
+        # 设置超时时间
+        SEARCH_TIMEOUT = 12
+
+        def search_alibaba():
+            search_parts = ["alibaba", keyword]
+            if category:
+                search_parts.append(category)
+            if min_price and max_price:
+                search_parts.append(f"price{min_price}-{max_price}")
+            search_parts.append("wholesale")
+
+            search_query = " ".join(search_parts)
+
+            ctx = new_context(method="search.alibaba")
+            client = SearchClient(ctx=ctx)
+
+            response = client.search(
+                query=search_query,
+                search_type="web_summary",
+                count=count,
+                sites="alibaba.com",
+                need_summary=True
+            )
+            return response
+
+        # 带超时的搜索
         results = []
-        if response.web_items:
-            for item in response.web_items:
-                result = {
-                    "title": item.title,
-                    "url": item.url,
-                    "snippet": item.snippet,
-                    "site_name": item.site_name,
-                    "summary": item.summary if hasattr(item, 'summary') else ""
-                }
-                results.append(result)
-        
+        ai_summary = ""
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(search_alibaba)
+                response = future.result(timeout=SEARCH_TIMEOUT)
+
+                if response.web_items:
+                    for item in response.web_items:
+                        result = {
+                            "title": item.title,
+                            "url": item.url,
+                            "snippet": item.snippet,
+                            "site_name": item.site_name,
+                            "summary": item.summary if hasattr(item, 'summary') else ""
+                        }
+                        results.append(result)
+
+                ai_summary = response.summary if hasattr(response, 'summary') else ""
+        except FutureTimeoutError:
+            ai_summary = "搜索超时，仅返回部分结果"
+        except Exception as e:
+            ai_summary = f"搜索出错: {str(e)}"
+
         output = {
             "platform": "阿里巴巴",
             "keyword": keyword,
             "total_results": len(results),
-            "ai_summary": response.summary if hasattr(response, 'summary') else "",
+            "ai_summary": ai_summary,
             "results": results
         }
-        
+
         return json.dumps(output, ensure_ascii=False, indent=2)
-        
+
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
@@ -1296,19 +1407,27 @@ def create_trend_notification(user_id: str, category: str, growth_rate: float,
 def parse_product_link(product_url: str, analysis_depth: str = "standard") -> str:
     """
     分析淘宝/拼多多产品链接，获取产品详细信息并进行市场分析。
-    
+
     Args:
         product_url: 产品链接（淘宝/拼多多），如 https://item.taobao.com/item.htm?id=123456
         analysis_depth: 分析深度（quick/standard/deep），默认standard
-    
+                        - quick: 快速分析，只获取基本信息
+                        - standard: 标准分析，包含货源和竞品搜索（默认）
+                        - deep: 深度分析（当前等同于standard）
+
     Returns:
         产品分析结果的JSON格式字符串，包含产品信息、市场分析、货源建议等
     """
     try:
         import re
         from datetime import datetime
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
         from coze_coding_dev_sdk import get_session
         from storage.database.shared.model import ProductLinkAnalysis
+
+        # 设置超时时间（秒）
+        MAIN_SEARCH_TIMEOUT = 15
+        SECONDARY_SEARCH_TIMEOUT = 10
 
         # 1. 识别平台
         platform = None
@@ -1338,107 +1457,147 @@ def parse_product_link(product_url: str, analysis_depth: str = "standard") -> st
                 "error": "不支持的平台链接，仅支持淘宝、拼多多、京东"
             }, ensure_ascii=False, indent=2)
 
-        # 2. 使用网络搜索获取产品信息
-        search_query = f"{product_url} 产品详情 销量 评价"
-        
-        ctx = new_context(method="search.product")
-        client = SearchClient(ctx=ctx)
-        
-        response = client.web_search(
-            query=search_query,
-            count=15,
-            need_summary=True
-        )
-        
-        # 3. 分析搜索结果，提取产品信息
+        # 2. 使用网络搜索获取产品信息（带超时）
+        def get_product_info():
+            search_query = f"{product_url} 产品详情"
+            ctx = new_context(method="search.product")
+            client = SearchClient(ctx=ctx)
+            response = client.web_search(
+                query=search_query,
+                count=10,
+                need_summary=True
+            )
+            return response
+
         product_info = {
             "platform": platform,
             "product_id": product_id,
             "product_url": product_url
         }
-        
-        # 从搜索结果中提取信息
+
+        # 带超时的搜索
         search_results = []
-        if response.web_items:
-            for item in response.web_items:
-                search_results.append({
-                    "title": item.title,
-                    "url": item.url,
-                    "snippet": item.snippet,
-                    "site_name": item.site_name
-                })
-        
-        # 基于搜索结果推断产品信息
-        if search_results:
-            # 从标题中提取产品名称
-            first_title = search_results[0]["title"]
-            product_info["product_title"] = first_title[:200]  # 限制长度
-            
-            # 从摘要中提取关键信息
-            ai_summary = response.summary if hasattr(response, 'summary') else ""
-            product_info["ai_summary"] = ai_summary
-        
-        # 4. 进行市场分析和货源搜索
-        # 提取品类（从标题或搜索结果）
-        category_keywords = []
-        if "product_title" in product_info:
-            # 简单提取可能的品类关键词
-            title = product_info["product_title"]
-            # 常见品类关键词
-            common_categories = ["面膜", "手机壳", "衣服", "鞋", "包", "食品", "化妆品", "数码", "家电", "家居"]
-            for cat in common_categories:
-                if cat in title:
-                    category_keywords.append(cat)
-        
-        category = category_keywords[0] if category_keywords else "其他"
-        product_info["category"] = category
-        
-        # 搜索该品类在1688和阿里巴巴的货源
-        sourcing_results = []
-        
+        category = "其他"
+
         try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(get_product_info)
+                response = future.result(timeout=MAIN_SEARCH_TIMEOUT)
+
+                # 从搜索结果中提取信息
+                if response.web_items:
+                    for item in response.web_items[:5]:  # 只取前5个结果
+                        search_results.append({
+                            "title": item.title,
+                            "url": item.url,
+                            "snippet": item.snippet,
+                            "site_name": item.site_name
+                        })
+
+                # 从标题中提取产品名称和品类
+                if search_results:
+                    first_title = search_results[0]["title"]
+                    product_info["product_title"] = first_title[:200]  # 限制长度
+                    product_info["ai_summary"] = response.summary if hasattr(response, 'summary') else ""
+
+                    # 提取品类
+                    common_categories = ["面膜", "手机壳", "衣服", "鞋", "包", "食品", "化妆品", "数码", "家电", "家居", "母婴", "运动"]
+                    for cat in common_categories:
+                        if cat in first_title:
+                            category = cat
+                            break
+                    product_info["category"] = category
+        except FutureTimeoutError:
+            # 主搜索超时，使用默认值
+            product_info["search_timeout"] = True
+            product_info["ai_summary"] = "产品信息搜索超时，建议稍后重试"
+        except Exception as e:
+            product_info["search_error"] = str(e)
+
+        # 3. 如果是快速分析模式，跳过货源和竞品搜索
+        if analysis_depth == "quick":
+            analysis_result = {
+                "success": True,
+                "product_info": product_info,
+                "market_analysis": {
+                    "category": category,
+                    "competitor_count": 0,
+                    "sourcing_count": 0,
+                    "analysis_depth": "quick"
+                },
+                "sourcing_opportunities": [],
+                "competitors": [],
+                "analysis_summary": f"快速分析完成：{platform}平台产品链接，识别为{category}品类。",
+                "analyzed_at": datetime.now().isoformat()
+            }
+            return json.dumps(analysis_result, ensure_ascii=False, indent=2)
+
+        # 4. 标准分析：搜索货源和竞品（带超时，可并行）
+        sourcing_results = []
+        competitor_results = []
+
+        def search_sourcing():
             sourcing_query = f"1688 {category} 同款 批发"
-            sourcing_response = client.search(
+            ctx = new_context(method="search.sourcing")
+            client = SearchClient(ctx=ctx)
+            response = client.search(
                 query=sourcing_query,
                 search_type="web_summary",
-                count=10,
+                count=5,  # 减少结果数量
                 sites="1688.com",
                 need_summary=True
             )
-            
-            if sourcing_response.web_items:
-                for item in sourcing_response.web_items:
-                    sourcing_results.append({
+            results = []
+            if response.web_items:
+                for item in response.web_items:
+                    results.append({
                         "source": "1688",
                         "title": item.title,
                         "url": item.url,
                         "snippet": item.snippet
                     })
-        except Exception as e:
-            pass
-        
-        # 5. 竞品分析
-        competitor_results = []
-        try:
-            competitor_query = f"淘宝 {category} 热销 销量排行"
-            competitor_response = client.search(
+            return results
+
+        def search_competitors():
+            competitor_query = f"淘宝 {category} 热销"
+            ctx = new_context(method="search.competitor")
+            client = SearchClient(ctx=ctx)
+            response = client.search(
                 query=competitor_query,
                 search_type="web_summary",
-                count=10,
+                count=5,  # 减少结果数量
                 need_summary=True
             )
-            
-            if competitor_response.web_items:
-                for item in competitor_response.web_items:
-                    competitor_results.append({
+            results = []
+            if response.web_items:
+                for item in response.web_items:
+                    results.append({
                         "title": item.title,
                         "url": item.url,
                         "snippet": item.snippet
                     })
+            return results
+
+        # 并行执行货源和竞品搜索
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_sourcing = executor.submit(search_sourcing)
+                future_competitors = executor.submit(search_competitors)
+
+                try:
+                    sourcing_results = future_sourcing.result(timeout=SECONDARY_SEARCH_TIMEOUT)
+                except FutureTimeoutError:
+                    pass
+
+                try:
+                    competitor_results = future_competitors.result(timeout=SECONDARY_SEARCH_TIMEOUT)
+                except FutureTimeoutError:
+                    pass
         except Exception as e:
+            # 搜索失败不影响主流程
             pass
-        
-        # 6. 综合分析结果
+
+        # 5. 综合分析结果
         analysis_result = {
             "success": True,
             "product_info": product_info,
@@ -1453,11 +1612,10 @@ def parse_product_link(product_url: str, analysis_depth: str = "standard") -> st
             "analysis_summary": f"已成功分析{platform}平台产品链接，识别为{category}品类，找到{len(sourcing_results)}个潜在货源和{len(competitor_results)}个竞品。",
             "analyzed_at": datetime.now().isoformat()
         }
-        
-        # 7. 保存分析结果到数据库
-        try:
-            def save_analysis(db):
-                # 创建分析记录
+
+        # 6. 保存分析结果到数据库（异步，不阻塞返回）
+        def save_analysis(db):
+            try:
                 analysis = ProductLinkAnalysis(
                     original_url=product_url,
                     platform=platform,
@@ -1465,32 +1623,32 @@ def parse_product_link(product_url: str, analysis_depth: str = "standard") -> st
                     product_title=product_info.get("product_title"),
                     category=category,
                     market_analysis=json.dumps(analysis_result["market_analysis"], ensure_ascii=False),
-                    competitor_info=json.dumps(competitor_results[:5], ensure_ascii=False),  # 只保存前5个
-                    sourcing_suggestions=json.dumps(sourcing_results[:5], ensure_ascii=False),  # 只保存前5个
+                    competitor_info=json.dumps(competitor_results[:5], ensure_ascii=False),
+                    sourcing_suggestions=json.dumps(sourcing_results[:5], ensure_ascii=False),
                     analysis_summary=analysis_result["analysis_summary"],
-                    potential_score=min(10, len(sourcing_results) // 2 + 5),  # 简单计算潜力分数
+                    potential_score=min(10, len(sourcing_results) // 2 + 5),
                     status="analyzed",
                     analyzed_at=datetime.now()
                 )
-
                 db.add(analysis)
                 db.commit()
-                db.refresh(analysis)  # 刷新以获取ID
-                return analysis.id  # 只返回ID
+                db.refresh(analysis)
+                return analysis.id
+            except Exception as e:
+                # 数据库保存失败不影响主流程
+                return None
 
-            analysis_id = execute_with_retry(save_analysis, max_retries=3, retry_delay=1)
-            analysis_result["database_id"] = analysis_id
-            analysis_result["saved_to_db"] = True
-
+        try:
+            analysis_id = execute_with_retry(save_analysis, max_retries=2, retry_delay=0.5)
+            if analysis_id:
+                analysis_result["database_id"] = analysis_id
+                analysis_result["saved_to_db"] = True
         except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
             analysis_result["saved_to_db"] = False
             analysis_result["db_error"] = str(e)
-            analysis_result["db_error_details"] = error_details
-        
+
         return json.dumps(analysis_result, ensure_ascii=False, indent=2)
-        
+
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
@@ -1505,19 +1663,27 @@ def parse_product_link(product_url: str, analysis_depth: str = "standard") -> st
 def parse_shop_link(shop_url: str, analysis_depth: str = "standard") -> str:
     """
     分析淘宝/拼多多店铺链接，获取店铺详细信息并进行市场分析。
-    
+
     Args:
         shop_url: 店铺链接（淘宝/拼多多），如 https://shop12345.taobao.com
         analysis_depth: 分析深度（quick/standard/deep），默认standard
-    
+                        - quick: 快速分析，只获取基本信息
+                        - standard: 标准分析，包含热销产品和货源搜索（默认）
+                        - deep: 深度分析（当前等同于standard）
+
     Returns:
         店铺分析结果的JSON格式字符串，包含店铺信息、产品分析、货源机会等
     """
     try:
         import re
         from datetime import datetime
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
         from coze_coding_dev_sdk import get_session
         from storage.database.shared.model import ShopLinkAnalysis
+
+        # 设置超时时间（秒）
+        MAIN_SEARCH_TIMEOUT = 15
+        SECONDARY_SEARCH_TIMEOUT = 10
 
         # 1. 识别平台
         platform = None
@@ -1552,121 +1718,163 @@ def parse_shop_link(shop_url: str, analysis_depth: str = "standard") -> str:
                 "error": "不支持的平台链接，仅支持淘宝、拼多多、京东"
             }, ensure_ascii=False, indent=2)
 
-        # 2. 使用网络搜索获取店铺信息
-        search_query = f"{shop_url} 店铺信息 销量 产品"
-        
-        ctx = new_context(method="search.shop")
-        client = SearchClient(ctx=ctx)
-        
-        response = client.web_search(
-            query=search_query,
-            count=15,
-            need_summary=True
-        )
-        
-        # 3. 分析搜索结果，提取店铺信息
+        # 2. 使用网络搜索获取店铺信息（带超时）
+        def get_shop_info():
+            search_query = f"{shop_url} 店铺信息"
+            ctx = new_context(method="search.shop")
+            client = SearchClient(ctx=ctx)
+            response = client.web_search(
+                query=search_query,
+                count=10,
+                need_summary=True
+            )
+            return response
+
         shop_info = {
             "platform": platform,
             "shop_id": shop_id,
             "shop_url": shop_url
         }
-        
-        # 从搜索结果中提取信息
+
+        # 带超时的搜索
         search_results = []
-        if response.web_items:
-            for item in response.web_items:
-                search_results.append({
-                    "title": item.title,
-                    "url": item.url,
-                    "snippet": item.snippet,
-                    "site_name": item.site_name
-                })
-        
-        # 基于搜索结果推断店铺信息
-        if search_results:
-            first_title = search_results[0]["title"]
-            shop_info["shop_name"] = first_title[:100]  # 限制长度
-            
-            # 从摘要中提取关键信息
-            ai_summary = response.summary if hasattr(response, 'summary') else ""
-            shop_info["ai_summary"] = ai_summary
-        
-        # 4. 搜索店铺的热销产品
-        top_products = []
         main_category = "未知"
-        
+
         try:
-            # 从搜索结果中推断品类
-            if "shop_name" in shop_info:
-                shop_name = shop_info["shop_name"]
-                # 常见店铺类型关键词
-                shop_types = ["旗舰店", "专营店", "专卖店", "官方店"]
-                for shop_type in shop_types:
-                    if shop_type in shop_name:
-                        shop_info["shop_type"] = shop_type
-                        break
-                
-                # 从店名推断主营品类
-                common_categories = ["美妆", "服饰", "数码", "家电", "食品", "家居", "母婴", "运动"]
-                for cat in common_categories:
-                    if cat in shop_name:
-                        main_category = cat
-                        break
-            
-            shop_info["main_category"] = main_category
-            
-            # 搜索该店铺的热销产品
-            product_search_query = f"{shop_url} 热销产品 销量排行"
-            product_response = client.search(
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(get_shop_info)
+                response = future.result(timeout=MAIN_SEARCH_TIMEOUT)
+
+                # 从搜索结果中提取信息
+                if response.web_items:
+                    for item in response.web_items[:5]:  # 只取前5个结果
+                        search_results.append({
+                            "title": item.title,
+                            "url": item.url,
+                            "snippet": item.snippet,
+                            "site_name": item.site_name
+                        })
+
+                # 从标题中提取店铺名称和品类
+                if search_results:
+                    first_title = search_results[0]["title"]
+                    shop_info["shop_name"] = first_title[:100]  # 限制长度
+                    shop_info["ai_summary"] = response.summary if hasattr(response, 'summary') else ""
+
+                    # 推断店铺类型
+                    shop_types = ["旗舰店", "专营店", "专卖店", "官方店"]
+                    for shop_type in shop_types:
+                        if shop_type in first_title:
+                            shop_info["shop_type"] = shop_type
+                            break
+
+                    # 推断主营品类
+                    common_categories = ["美妆", "服饰", "数码", "家电", "食品", "家居", "母婴", "运动"]
+                    for cat in common_categories:
+                        if cat in first_title:
+                            main_category = cat
+                            break
+
+                    shop_info["main_category"] = main_category
+        except FutureTimeoutError:
+            # 主搜索超时，使用默认值
+            shop_info["search_timeout"] = True
+            shop_info["ai_summary"] = "店铺信息搜索超时，建议稍后重试"
+        except Exception as e:
+            shop_info["search_error"] = str(e)
+
+        # 3. 如果是快速分析模式，跳过产品搜索
+        if analysis_depth == "quick":
+            analysis_result = {
+                "success": True,
+                "shop_info": shop_info,
+                "top_products": [],
+                "market_position": {
+                    "category": main_category,
+                    "platform": platform,
+                    "product_count": 0,
+                    "sourcing_count": 0
+                },
+                "sourcing_opportunities": [],
+                "analysis_summary": f"快速分析完成：{platform}平台店铺链接，识别为{main_category}品类店铺。",
+                "analyzed_at": datetime.now().isoformat()
+            }
+            return json.dumps(analysis_result, ensure_ascii=False, indent=2)
+
+        # 4. 标准分析：搜索热销产品和货源（带超时，可并行）
+        top_products = []
+        sourcing_opportunities = []
+
+        def search_products():
+            product_search_query = f"{shop_url} 热销产品"
+            ctx = new_context(method="search.shop_products")
+            client = SearchClient(ctx=ctx)
+            response = client.search(
                 query=product_search_query,
                 search_type="web_summary",
-                count=10,
+                count=5,  # 减少结果数量
                 need_summary=True
             )
-            
-            if product_response.web_items:
-                for idx, item in enumerate(product_response.web_items[:5], 1):
-                    top_products.append({
+            results = []
+            if response.web_items:
+                for idx, item in enumerate(response.web_items[:3], 1):  # 只取前3个
+                    results.append({
                         "rank": idx,
                         "title": item.title,
                         "url": item.url,
                         "snippet": item.snippet
                     })
-        except Exception as e:
-            pass
-        
-        # 5. 搜索该品类的货源机会
-        sourcing_opportunities = []
-        try:
-            sourcing_query = f"1688 {main_category} 店铺货源 批发工厂"
-            sourcing_response = client.search(
+            return results
+
+        def search_sourcing():
+            sourcing_query = f"1688 {main_category} 店铺货源"
+            ctx = new_context(method="search.sourcing")
+            client = SearchClient(ctx=ctx)
+            response = client.search(
                 query=sourcing_query,
                 search_type="web_summary",
-                count=10,
+                count=5,  # 减少结果数量
                 sites="1688.com",
                 need_summary=True
             )
-            
-            if sourcing_response.web_items:
-                for item in sourcing_response.web_items:
-                    sourcing_opportunities.append({
+            results = []
+            if response.web_items:
+                for item in response.web_items:
+                    results.append({
                         "source": "1688",
                         "title": item.title,
                         "url": item.url,
                         "snippet": item.snippet
                     })
+            return results
+
+        # 并行执行产品和货源搜索
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_products = executor.submit(search_products)
+                future_sourcing = executor.submit(search_sourcing)
+
+                try:
+                    top_products = future_products.result(timeout=SECONDARY_SEARCH_TIMEOUT)
+                except FutureTimeoutError:
+                    pass
+
+                try:
+                    sourcing_opportunities = future_sourcing.result(timeout=SECONDARY_SEARCH_TIMEOUT)
+                except FutureTimeoutError:
+                    pass
         except Exception as e:
+            # 搜索失败不影响主流程
             pass
-        
-        # 6. 市场定位分析
+
+        # 5. 综合分析结果
         market_position = {
             "category": main_category,
             "platform": platform,
             "product_count": len(top_products),
             "sourcing_count": len(sourcing_opportunities)
         }
-        
-        # 7. 综合分析结果
+
         analysis_result = {
             "success": True,
             "shop_info": shop_info,
@@ -1676,11 +1884,10 @@ def parse_shop_link(shop_url: str, analysis_depth: str = "standard") -> str:
             "analysis_summary": f"已成功分析{platform}平台店铺链接，识别为{main_category}品类店铺，发现{len(top_products)}个热销产品和{len(sourcing_opportunities)}个潜在货源机会。",
             "analyzed_at": datetime.now().isoformat()
         }
-        
-        # 8. 保存分析结果到数据库
-        try:
-            def save_analysis(db):
-                # 创建分析记录
+
+        # 6. 保存分析结果到数据库（异步，不阻塞返回）
+        def save_analysis(db):
+            try:
                 analysis = ShopLinkAnalysis(
                     original_url=shop_url,
                     platform=platform,
@@ -1696,25 +1903,25 @@ def parse_shop_link(shop_url: str, analysis_depth: str = "standard") -> str:
                     status="analyzed",
                     analyzed_at=datetime.now()
                 )
-
                 db.add(analysis)
                 db.commit()
-                db.refresh(analysis)  # 刷新以获取ID
-                return analysis.id  # 只返回ID
+                db.refresh(analysis)
+                return analysis.id
+            except Exception as e:
+                # 数据库保存失败不影响主流程
+                return None
 
-            analysis_id = execute_with_retry(save_analysis, max_retries=3, retry_delay=1)
-            analysis_result["database_id"] = analysis_id
-            analysis_result["saved_to_db"] = True
-
+        try:
+            analysis_id = execute_with_retry(save_analysis, max_retries=2, retry_delay=0.5)
+            if analysis_id:
+                analysis_result["database_id"] = analysis_id
+                analysis_result["saved_to_db"] = True
         except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
             analysis_result["saved_to_db"] = False
             analysis_result["db_error"] = str(e)
-            analysis_result["db_error_details"] = error_details
-        
+
         return json.dumps(analysis_result, ensure_ascii=False, indent=2)
-        
+
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
