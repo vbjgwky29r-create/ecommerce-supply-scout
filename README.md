@@ -50,6 +50,18 @@ cd src/web
 python3 app.py
 ```
 
+### 方式3：云端部署（推荐，分享给朋友）
+
+🌐 **一键部署到 Railway/Render，生成公网链接分享给朋友**
+
+👉 [查看云端部署指南](docs/deployment-guide.md)
+
+**快速步骤：**
+1. 上传代码到 GitHub：[查看上传指南](docs/upload-to-github.md)
+2. 在 Railway 部署项目
+3. 配置环境变量
+4. 获取公网链接并分享
+
 然后在浏览器访问：http://localhost:5000
 
 ### 方式3：部署到云端（分享给朋友）⭐推荐
