@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     region: singapore
-    buildCommand: rm -rf .venv __pycache__ .pytest_cache && pip install --no-cache-dir --force-reinstall -r requirements-render.txt
+    buildCommand: rm -rf .venv __pycache__ .pytest_cache && pip install --no-cache-dir --force-reinstall --upgrade --ignore-installed -r requirements-render.txt
     startCommand: python src/web/app.py
     envVars:
       - key: FLASK_SECRET_KEY
