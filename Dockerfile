@@ -1,4 +1,5 @@
 # 使用 Python 3.11.11 作为基础镜像
+# Build version: 2025-01-20-v3
 FROM python:3.11.11-slim
 
 # 设置工作目录
