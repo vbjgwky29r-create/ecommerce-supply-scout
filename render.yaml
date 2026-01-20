@@ -4,8 +4,8 @@ services:
     runtime: python
     plan: free
     region: singapore
-    buildCommand: rm -rf .venv __pycache__ .pytest_cache && pip install --no-cache-dir --force-reinstall --upgrade --ignore-installed -r requirements-render.txt
-    startCommand: python src/web/app.py
+    buildCommand: pip install --no-cache-dir --force-reinstall --upgrade --ignore-installed -r requirements-render.txt
+    startCommand: bash scripts/render_start.sh
     envVars:
       - key: FLASK_SECRET_KEY
         value: ecommerce-agent-secret-key-2024
