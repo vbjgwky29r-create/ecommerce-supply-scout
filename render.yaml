@@ -4,20 +4,7 @@ services:
     runtime: python
     plan: free
     region: singapore
-    buildCommand: |
-      echo "=== 强制清理所有缓存 ==="
-      rm -rf .venv __pycache__ .pytest_cache .mypy_cache .eggs *.egg-info dist build
-      rm -rf ~/.cache/pip
-      echo "=== 重新创建虚拟环境 ==="
-      python -m venv .venv
-      . .venv/bin/activate
-      pip install --upgrade pip
-      echo "=== 安装依赖 ==="
-      pip install --no-cache-dir --force-reinstall -r requirements.txt
-      echo "=== 验证关键依赖 ==="
-      .venv/bin/pip show coze-coding-dev-sdk | grep Version
-    startCommand: |
-      .venv/bin/python src/web/app.py
+    startCommand: bash start.sh
     envVars:
       - key: FLASK_SECRET_KEY
         value: ecommerce-agent-secret-key-2024
