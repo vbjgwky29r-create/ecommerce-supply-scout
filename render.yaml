@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: ecommerce-scout
+    env: docker
+    plan: free
+    region: singapore
+    envVars:
+      - key: FLASK_SECRET_KEY
+        value: ecommerce-agent-secret-key-2024
+      - key: COZE_WORKLOAD_IDENTITY_API_KEY
+        value: e863036f-fe71-4771-9510-9a5d329d65c8
+      - key: PORT
+        value: 5000
