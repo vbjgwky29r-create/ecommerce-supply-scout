@@ -1,0 +1,78 @@
+{
+  "timestamp": "2026-01-20T19:05:22.346833",
+  "platform": "Render",
+  "application": "电商货源猎手 Web 服务",
+  "tech_stack": {
+    "runtime": "Python 3.11.11",
+    "framework": "Flask + Flask-SocketIO",
+    "dependencies": "requirements.txt / requirements-render.txt"
+  },
+  "issues_encountered": [
+    {
+      "issue": "pandas 编译失败",
+      "error": "Python 3.13 与 pandas 2.2.2 不兼容",
+      "fix": "创建 .python-version 文件指定 Python 3.11.11"
+    },
+    {
+      "issue": "dbus-python 依赖缺失",
+      "error": "Dependency dbus-1 not found",
+      "fix": "从 requirements.txt 中移除 dbus-python 和 PyGObject"
+    },
+    {
+      "issue": "找不到 requirements-render.txt",
+      "error": "No such file or directory: 'requirements-render.txt'",
+      "fix": "创建 requirements-render.txt 文件"
+    },
+    {
+      "issue": "coze_coding_dev_sdk 版本错误（持续问题）",
+      "error": "SyntaxError: f-string: unmatched '('",
+      "details": "Render 持续安装 0.5.5 版本而不是 0.5.4",
+      "attempts": [
+        "降级到 0.5.4",
+        "重新排序依赖文件（放在第二行）",
+        "添加 --force-reinstall 选项",
+        "添加 --upgrade 和 --ignore-installed 选项",
+        "删除 .venv 缓存目录"
+      ]
+    },
+    {
+      "issue": "blinker 模块缺失",
+      "error": "ModuleNotFoundError: No module named 'blinker'",
+      "fix": "将 blinker==1.9.0 移至 requirements.txt 首行"
+    },
+    {
+      "issue": "端口检测失败",
+      "error": "No open ports detected",
+      "fix": "修改 app.py 优先使用 Render 的 PORT 环境变量"
+    }
+  ],
+  "current_configuration": {
+    "render.yaml": "\nservices:\n  - type: web\n    name: ecommerce-scout\n    runtime: python\n    plan: free\n    region: singapore\n    buildCommand: rm -rf .venv __pycache__ .pytest_cache && pip install --no-cache-dir --force-reinstall --upgrade --ignore-installed -r requirements-render.txt\n    startCommand: python src/web/app.py\n",
+    "requirements-render.txt": {
+      "first_lines": [
+        "blinker==1.9.0",
+        "coze-coding-dev-sdk==0.5.4",
+        "alembic==1.16.5"
+      ],
+      "excluded_packages": [
+        "dbus-python",
+        "PyGObject"
+      ]
+    },
+    "app.py": {
+      "port_config": "port = int(os.getenv('PORT', os.getenv('WEB_PORT', 5000)))"
+    },
+    ".python-version": "3.11.11"
+  },
+  "persistent_problem": {
+    "description": "Render 平台持续安装 coze_coding_dev_sdk 0.5.5 版本",
+    "error_message": "File \"/opt/render/project/src/.venv/lib/python3.11/site-packages/coze_coding_dev_sdk/core/client.py\", line 231\n    f\"响应解析失败: {str(e)}, logid: {response.headers.get(\"X-Tt-Logid\")}, 响应内容: {response.text[:200]}\",\n                                                      ^\nSyntaxError: f-string: unmatched '('",
+    "hypotheses": [
+      "Render 平台有多层缓存机制（pip cache、virtualenv cache、repository cache）",
+      "coze_coding_dev_sdk 的其他依赖包（coze-coding-utils、cozeloop等）间接引入了 0.5.5 版本",
+      "render.yaml 的 buildCommand 在某些情况下被忽略",
+      "requirements.txt 和 requirements-render.txt 同时存在导致冲突",
+      "pip 的依赖解析器选择了更高版本的 coze_coding_dev_sdk"
+    ]
+  }
+}
