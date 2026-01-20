@@ -274,9 +274,9 @@ def handle_clear_history():
 if __name__ == '__main__':
     logger.info("启动电商货源猎手 Web 服务...")
     
-    # 获取配置
+    # 获取配置 - 优先使用 Render 的 PORT 环境变量
     host = os.getenv('WEB_HOST', '0.0.0.0')
-    port = int(os.getenv('WEB_PORT', 5000))
+    port = int(os.getenv('PORT', os.getenv('WEB_PORT', 5000)))
     debug = os.getenv('WEB_DEBUG', 'False').lower() == 'true'
     
     logger.info(f"服务地址: http://{host}:{port}")
