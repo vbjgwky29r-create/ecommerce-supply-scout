@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     region: singapore
-    buildCommand: rm -rf .venv && pip install --no-cache-dir -r requirements-render.txt
+    buildCommand: rm -rf .venv && pip install --no-cache-dir --constraint constraints.txt -r requirements-render.txt
     startCommand: python src/web/app.py
     envVars:
       - key: FLASK_SECRET_KEY
