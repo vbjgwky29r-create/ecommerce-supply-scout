@@ -1,11 +1,9 @@
 services:
   - type: web
     name: ecommerce-scout
-    runtime: python
+    runtime: docker
     plan: free
     region: singapore
-    buildCommand: pip install --no-cache-dir --force-reinstall --upgrade --ignore-installed -r requirements-render.txt
-    startCommand: bash scripts/render_start.sh
     envVars:
       - key: FLASK_SECRET_KEY
         value: ecommerce-agent-secret-key-2024
