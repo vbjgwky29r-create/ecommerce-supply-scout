@@ -1536,13 +1536,24 @@ def create_trend_notification(user_id: str, category: str, growth_rate: float,
 
 def build_agent(ctx=None):
     # 获取当前工作目录（兼容本地和云端部署）
-    if os.getenv("COZE_WORKSPACE_PATH"):
-        workspace_path = os.getenv("COZE_WORKSPACE_PATH")
-    else:
-        # 如果没有设置 COZE_WORKSPACE_PATH，使用当前工作目录
-        workspace_path = os.getcwd()
+    # 优先使用当前工作目录，而不是环境变量
+    workspace_path = os.getcwd()
     
     config_path = os.path.join(workspace_path, LLM_CONFIG)
+    
+    # 如果配置文件不存在，尝试使用环境变量
+    if not os.path.exists(config_path) and os.getenv("COZE_WORKSPACE_PATH"):
+        workspace_path = os.getenv("COZE_WORKSPACE_PATH")
+        config_path = os.path.join(workspace_path, LLM_CONFIG)
+    
+    # 如果仍然找不到，抛出清晰的错误
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(
+            f"配置文件未找到: {config_path}\n"
+            f"当前工作目录: {os.getcwd()}\n"
+            f"COZE_WORKSPACE_PATH: {os.getenv('COZE_WORKSPACE_PATH')}\n"
+            f"尝试的路径: {config_path}"
+        )
     
     with open(config_path, 'r', encoding='utf-8') as f:
         cfg = json.load(f)
