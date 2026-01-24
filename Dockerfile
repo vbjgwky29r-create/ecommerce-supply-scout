@@ -4,7 +4,7 @@ FROM python:3.11.11-slim
 # 构建版本号ARG（每次修改依赖时递增，强制清除Docker缓存）
 # 降级SDK到0.5.3修复f-string语法错误（专家团会诊结论）
 # 修复配置文件路径问题
-ARG BUILD_VERSION=2025-01-20-v9
+ARG BUILD_VERSION=2025-01-20-v10
 ENV BUILD_VERSION=${BUILD_VERSION}
 
 # 设置工作目录
