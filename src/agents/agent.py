@@ -205,10 +205,14 @@ def image_analysis_tool(image_url: str, analysis_type: str = "general") -> str:
         import os
         import base64
         import imghdr
+        from io import BytesIO
+        from PIL import Image
         from langchain_core.messages import SystemMessage, HumanMessage
         
         # 处理本地图片路径，转换为 base64
         processed_image_url = image_url
+        image_data_original = None
+        image_format = 'jpg'
         
         # 检查是否是本地路径
         if image_url.startswith('assets/') or image_url.startswith('./assets/') or image_url.startswith('/'):
@@ -225,23 +229,82 @@ def image_analysis_tool(image_url: str, analysis_type: str = "general") -> str:
             if os.path.exists(image_path) and os.path.isfile(image_path):
                 try:
                     with open(image_path, 'rb') as f:
-                        image_data = f.read()
+                        image_data_original = f.read()
                     
                     # 检测图片格式
-                    image_format = imghdr.what(None, h=image_data)
-                    if not image_format:
-                        image_format = 'png'  # 默认使用 png
+                    detected_format = imghdr.what(None, h=image_data_original)
+                    image_format = detected_format if detected_format else 'jpg'
                     
-                    # 转换为 base64
-                    image_base64 = base64.b64encode(image_data).decode('utf-8')
-                    processed_image_url = f"data:image/{image_format};base64,{image_base64}"
-                    print(f"[image_analysis_tool] 本地图片已转换为 base64，格式: {image_format}, 大小: {len(image_base64)} 字符")
+                    print(f"[image_analysis_tool] 读取本地图片成功，格式: {image_format}, 原始大小: {len(image_data_original)} 字节")
                 except Exception as e:
                     print(f"[image_analysis_tool] 读取本地图片失败: {str(e)}")
                     raise Exception(f"无法读取本地图片: {str(e)}")
             else:
                 print(f"[image_analysis_tool] 本地图片文件不存在: {image_path}")
                 raise Exception(f"本地图片文件不存在: {image_path}")
+        
+        # 压缩图片以适应 API 限制
+        max_base64_size = 500000  # 500KB base64 字符限制
+        compression_attempts = 0
+        max_attempts = 5
+        
+        while compression_attempts < max_attempts:
+            # 如果是本地图片，压缩后编码
+            if image_data_original:
+                # 第一次尝试：直接编码
+                if compression_attempts == 0:
+                    image_data_to_encode = image_data_original
+                else:
+                    # 后续尝试：压缩图片
+                    img = Image.open(BytesIO(image_data_original))
+                    
+                    # 计算新的尺寸（每次缩小 20%）
+                    scale_factor = 0.8 ** compression_attempts
+                    new_width = int(img.width * scale_factor)
+                    new_height = int(img.height * scale_factor)
+                    
+                    # 调整大小
+                    img_resized = img.resize((new_width, new_height), Image.LANCZOS)
+                    
+                    # 转换为字节
+                    output_buffer = BytesIO()
+                    img_resized.save(output_buffer, format='JPEG', quality=85, optimize=True)
+                    image_data_to_encode = output_buffer.getvalue()
+                    image_format = 'jpg'
+                    
+                    print(f"[image_analysis_tool] 压缩尝试 #{compression_attempts + 1}: {new_width}x{new_height}, 大小: {len(image_data_to_encode)} 字节")
+            else:
+                # 网络图片，直接使用
+                image_data_to_encode = None
+                break
+            
+            # 转换为 base64
+            if image_data_to_encode:
+                image_base64 = base64.b64encode(image_data_to_encode).decode('utf-8')
+                processed_image_url = f"data:image/{image_format};base64,{image_base64}"
+                
+                print(f"[image_analysis_tool] base64 大小: {len(image_base64)} 字符")
+                
+                # 如果大小满足要求，停止压缩
+                if len(image_base64) <= max_base64_size:
+                    print(f"[image_analysis_tool] 图片大小满足要求，停止压缩")
+                    break
+                else:
+                    print(f"[image_analysis_tool] base64 大小超过限制 ({max_base64_size} 字符)，继续压缩...")
+                    compression_attempts += 1
+            else:
+                break
+        
+        # 如果压缩后仍然太大，返回错误
+        if image_data_to_encode and len(base64.b64encode(image_data_to_encode)) > max_base64_size:
+            error_msg = (
+                f"图片太大，无法处理（原始: {len(image_data_original)} 字节）。"
+                f"请使用较小的图片（建议小于 400KB）或提供图片 URL。"
+            )
+            print(f"[image_analysis_tool] {error_msg}")
+            raise Exception(error_msg)
+        
+        print(f"[image_analysis_tool] 最终图片 URL 大小: {len(processed_image_url)} 字符")
         
         # 创建 context
         ctx = new_context(method="image_analysis")
@@ -316,28 +379,46 @@ def image_analysis_tool(image_url: str, analysis_type: str = "general") -> str:
         ]
         
         # 调用视觉模型
+        print(f"[image_analysis_tool] 开始调用视觉模型...")
         response = llm_client.invoke(
             messages=messages,
             model="doubao-seed-1-6-vision-250815",
             temperature=0.7,
             max_completion_tokens=4096
         )
+        print(f"[image_analysis_tool] 视觉模型响应: type={type(response)}, content type={type(response.content)}")
         
         # 安全地提取响应内容
         def get_text_content(content):
             """安全地从 AIMessage content 中提取文本"""
+            print(f"[image_analysis_tool] get_text_content 输入: type={type(content)}")
             if isinstance(content, str):
+                print(f"[image_analysis_tool] 返回字符串内容，长度: {len(content)}")
                 return content
             elif isinstance(content, list):
+                print(f"[image_analysis_tool] 返回列表内容，元素数: {len(content)}")
                 text_parts = []
-                for item in content:
+                for i, item in enumerate(content):
+                    print(f"[image_analysis_tool]   item {i}: type={type(item)}")
                     if isinstance(item, dict) and item.get("type") == "text":
-                        text_parts.append(item.get("text", ""))
-                return " ".join(text_parts)
+                        text_part = item.get("text", "")
+                        text_parts.append(text_part)
+                        print(f"[image_analysis_tool]   item {i} text 长度: {len(text_part)}")
+                result = " ".join(text_parts)
+                print(f"[image_analysis_tool] 拼接后长度: {len(result)}")
+                return result
             else:
+                print(f"[image_analysis_tool] 返回字符串化内容")
                 return str(content)
         
         analysis_text = get_text_content(response.content)
+        print(f"[image_analysis_tool] 提取的分析文本长度: {len(analysis_text) if analysis_text else 0}")
+        
+        # 如果分析文本为空，返回友好的错误
+        if not analysis_text or len(analysis_text.strip()) == 0:
+            error_msg = "模型未能生成分析结果，可能是图片质量问题或服务异常。请尝试：\n1. 使用更清晰的图片\n2. 减小图片大小\n3. 稍后重试"
+            print(f"[image_analysis_tool] 分析结果为空")
+            raise Exception(error_msg)
         
         # 构建输出结果
         output = {
@@ -348,6 +429,7 @@ def image_analysis_tool(image_url: str, analysis_type: str = "general") -> str:
             "timestamp": "当前时间"
         }
         
+        print(f"[image_analysis_tool] 返回结果，总大小: {len(json.dumps(output))} 字符")
         return json.dumps(output, ensure_ascii=False, indent=2)
         
     except Exception as e:
