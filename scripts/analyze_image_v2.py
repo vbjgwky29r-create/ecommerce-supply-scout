@@ -2,7 +2,6 @@ import os
 import sys
 import base64
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
 
 # 读取图片并转换为 base64
 image_path = "assets/image.png"
@@ -26,7 +25,9 @@ llm = ChatOpenAI(
     temperature=0,
 )
 
-# 构建消息
+# 构建消息（使用正确的格式）
+from langchain_core.messages import HumanMessage, SystemMessage
+
 messages = [
     SystemMessage(content="""你是一个专业的 API Key 识别专家。请仔细分析用户上传的图片，识别其中的 API Key。
 
@@ -58,3 +59,5 @@ try:
     print(response.content)
 except Exception as e:
     print(f"错误：{e}")
+    import traceback
+    traceback.print_exc()
