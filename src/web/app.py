@@ -189,13 +189,32 @@ def handle_chat(data):
         
         # 构建输入消息
         from langchain_core.messages import HumanMessage
+        import base64
         
         # 如果有图片，使用多模态消息
         if image_url:
             # 检查是否是相对路径，转换为绝对路径
             if image_url.startswith('/uploads/'):
                 filename = image_url.replace('/uploads/', '')
-                image_url = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                
+                # 读取图片并转换为 base64
+                try:
+                    with open(image_path, 'rb') as f:
+                        image_data = f.read()
+                    # 检测图片格式
+                    import imghdr
+                    image_format = imghdr.what(None, h=image_data)
+                    if not image_format:
+                        image_format = 'png'  # 默认使用 png
+                    
+                    # 转换为 base64
+                    image_base64 = base64.b64encode(image_data).decode('utf-8')
+                    image_url = f"data:image/{image_format};base64,{image_base64}"
+                    logger.info(f"图片已转换为 base64，格式: {image_format}, 大小: {len(image_base64)} 字符")
+                except Exception as e:
+                    logger.error(f"图片转换失败: {str(e)}")
+                    raise
             
             input_message = HumanMessage(content=[
                 {
