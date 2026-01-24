@@ -3,7 +3,8 @@ FROM python:3.11.11-slim
 
 # 构建版本号ARG（每次修改依赖时递增，强制清除Docker缓存）
 # 降级SDK到0.5.3修复f-string语法错误（专家团会诊结论）
-ARG BUILD_VERSION=2025-01-20-v7
+# 修复配置文件路径问题
+ARG BUILD_VERSION=2025-01-20-v8
 ENV BUILD_VERSION=${BUILD_VERSION}
 
 # 设置工作目录
@@ -29,7 +30,10 @@ RUN pip show coze-coding-dev-sdk | grep Version
 COPY . .
 
 # 创建必要的目录
-RUN mkdir -p /tmp
+RUN mkdir -p /tmp /app/config
+
+# 确保 config 目录存在并包含配置文件
+RUN if [ ! -f /app/config/agent_llm_config.json ]; then echo "Error: config/agent_llm_config.json not found"; exit 1; fi
 
 # 设置环境变量
 ENV FLASK_SECRET_KEY=ecommerce-agent-secret-key-2024

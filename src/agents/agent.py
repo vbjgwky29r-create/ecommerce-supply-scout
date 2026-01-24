@@ -1535,7 +1535,13 @@ def create_trend_notification(user_id: str, category: str, growth_rate: float,
 
 
 def build_agent(ctx=None):
-    workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+    # 获取当前工作目录（兼容本地和云端部署）
+    if os.getenv("COZE_WORKSPACE_PATH"):
+        workspace_path = os.getenv("COZE_WORKSPACE_PATH")
+    else:
+        # 如果没有设置 COZE_WORKSPACE_PATH，使用当前工作目录
+        workspace_path = os.getcwd()
+    
     config_path = os.path.join(workspace_path, LLM_CONFIG)
     
     with open(config_path, 'r', encoding='utf-8') as f:
