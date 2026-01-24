@@ -1558,8 +1558,21 @@ def build_agent(ctx=None):
     with open(config_path, 'r', encoding='utf-8') as f:
         cfg = json.load(f)
     
-    api_key = os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
+    # 优先使用 ARK_API_KEY（火山方舟的 API Key），如果没有则使用 COZE_WORKLOAD_IDENTITY_API_KEY
+    api_key = os.getenv("ARK_API_KEY") or os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
     base_url = os.getenv("COZE_INTEGRATION_MODEL_BASE_URL")
+    
+    # 如果没有找到 API Key，抛出清晰的错误
+    if not api_key:
+        raise ValueError(
+            "缺少必需的环境变量！\n"
+            "请配置以下环境变量之一：\n"
+            "1. ARK_API_KEY（推荐，用于火山方舟大模型）\n"
+            "2. COZE_WORKLOAD_IDENTITY_API_KEY（Coze 平台的工作负载标识符）\n\n"
+            "环境变量配置位置：\n"
+            "- 本地开发：在 .env 文件中配置\n"
+            "- Render 部署：在 Render 控制台的 Environment 标签中配置"
+        )
     
     llm = ChatOpenAI(
         model=cfg['config'].get("model"),
