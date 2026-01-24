@@ -191,7 +191,7 @@ def image_analysis_tool(image_url: str, analysis_type: str = "general") -> str:
     分析产品图片，识别产品类型、特征、风格等信息，并基于图片内容进行市场分析和货源推荐。
     
     Args:
-        image_url: 产品图片URL，可以是网络图片URL或本地图片路径
+        image_url: 产品图片URL，可以是网络图片URL或本地图片路径（支持 assets/ 目录或绝对路径）
         analysis_type: 分析类型，可选值：
             - "general": 通用分析（识别产品类型、特征、风格）
             - "product": 产品分析（识别产品细节、材质、功能）
@@ -202,7 +202,46 @@ def image_analysis_tool(image_url: str, analysis_type: str = "general") -> str:
         图片分析结果的JSON格式字符串，包含产品识别、特征分析、市场建议等信息
     """
     try:
+        import os
+        import base64
+        import imghdr
         from langchain_core.messages import SystemMessage, HumanMessage
+        
+        # 处理本地图片路径，转换为 base64
+        processed_image_url = image_url
+        
+        # 检查是否是本地路径
+        if image_url.startswith('assets/') or image_url.startswith('./assets/') or image_url.startswith('/'):
+            # 构建完整路径
+            if image_url.startswith('assets/'):
+                image_path = os.path.join(os.getcwd(), image_url)
+            elif image_url.startswith('./assets/'):
+                image_path = os.path.join(os.getcwd(), image_url.lstrip('./'))
+            else:
+                # 绝对路径
+                image_path = image_url
+            
+            # 检查文件是否存在
+            if os.path.exists(image_path) and os.path.isfile(image_path):
+                try:
+                    with open(image_path, 'rb') as f:
+                        image_data = f.read()
+                    
+                    # 检测图片格式
+                    image_format = imghdr.what(None, h=image_data)
+                    if not image_format:
+                        image_format = 'png'  # 默认使用 png
+                    
+                    # 转换为 base64
+                    image_base64 = base64.b64encode(image_data).decode('utf-8')
+                    processed_image_url = f"data:image/{image_format};base64,{image_base64}"
+                    print(f"[image_analysis_tool] 本地图片已转换为 base64，格式: {image_format}, 大小: {len(image_base64)} 字符")
+                except Exception as e:
+                    print(f"[image_analysis_tool] 读取本地图片失败: {str(e)}")
+                    raise Exception(f"无法读取本地图片: {str(e)}")
+            else:
+                print(f"[image_analysis_tool] 本地图片文件不存在: {image_path}")
+                raise Exception(f"本地图片文件不存在: {image_path}")
         
         # 创建 context
         ctx = new_context(method="image_analysis")
@@ -270,7 +309,7 @@ def image_analysis_tool(image_url: str, analysis_type: str = "general") -> str:
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": image_url
+                        "url": processed_image_url
                     }
                 }
             ])
