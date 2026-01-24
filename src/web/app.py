@@ -224,8 +224,9 @@ def handle_chat(data):
         full_response = ""
         for chunk in agent.stream(inputs, config=session_config):
             # 提取响应内容
-            if chunk and 'agent' in chunk:
-                messages = chunk.get('agent', {}).get('messages', [])
+            # 注意：LangGraph 流式输出格式为 {'model': {'messages': [...]}}
+            if chunk and 'model' in chunk:
+                messages = chunk.get('model', {}).get('messages', [])
                 for msg in messages:
                     if hasattr(msg, 'content'):
                         content = msg.content
