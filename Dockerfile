@@ -1,6 +1,9 @@
 # 使用 Python 3.11.11 作为基础镜像
-# Build version: 2025-01-20-v3
 FROM python:3.11.11-slim
+
+# 构建版本号ARG（每次修改依赖时递增，强制清除Docker缓存）
+ARG BUILD_VERSION=2025-01-20-v5
+ENV BUILD_VERSION=${BUILD_VERSION}
 
 # 设置工作目录
 WORKDIR /app
