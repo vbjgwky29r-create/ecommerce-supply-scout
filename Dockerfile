@@ -2,9 +2,9 @@
 FROM python:3.11.11-slim
 
 # 构建版本号ARG（每次修改依赖时递增，强制清除Docker缓存）
-# 降级SDK到0.5.3修复f-string语法错误（专家团会诊结论）
+# 强制安装 coze-coding-dev-sdk==0.5.3 修复 f-string 语法错误（根本性解决方案）
 # 修复配置文件路径问题
-ARG BUILD_VERSION=2025-01-20-v16
+ARG BUILD_VERSION=2025-01-24-v26
 ENV BUILD_VERSION=${BUILD_VERSION}
 
 # 设置工作目录
@@ -22,6 +22,10 @@ COPY requirements.txt .
 
 # 安装 Python 依赖
 RUN pip install --no-cache-dir -r requirements.txt
+
+# 强制安装正确版本的关键依赖（覆盖 requirements.txt 中的版本）
+RUN pip install --no-cache-dir --force-reinstall \
+    coze-coding-dev-sdk==0.5.3
 
 # 验证关键依赖版本
 RUN pip show coze-coding-dev-sdk | grep Version
