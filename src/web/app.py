@@ -222,20 +222,41 @@ def handle_chat(data):
         
         # 流式调用Agent
         full_response = ""
+        chunk_count = 0
+        
+        logger.info(f"开始流式调用 Agent...")
+        
         for chunk in agent.stream(inputs, config=session_config):
+            chunk_count += 1
+            logger.info(f"收到 chunk #{chunk_count}: {list(chunk.keys())}")
+            
             # 提取响应内容
             # 注意：LangGraph 流式输出格式为 {'model': {'messages': [...]}}
             if chunk and 'model' in chunk:
-                messages = chunk.get('model', {}).get('messages', [])
-                for msg in messages:
-                    if hasattr(msg, 'content'):
-                        content = msg.content
-                        if isinstance(content, str):
-                            # 流式发送响应
-                            emit('message_chunk', {
-                                'content': content
-                            })
-                            full_response += content
+                logger.info(f"  chunk['model'] 存在")
+                model_data = chunk.get('model', {})
+                if 'messages' in model_data:
+                    messages = model_data.get('messages', [])
+                    logger.info(f"  消息数量: {len(messages)}")
+                    
+                    for i, msg in enumerate(messages):
+                        if hasattr(msg, 'content'):
+                            content = msg.content
+                            logger.info(f"  消息 #{i}: content 类型={type(content)}, 长度={len(content) if isinstance(content, str) else 'N/A'}")
+                            
+                            if isinstance(content, str) and content:
+                                # 流式发送响应
+                                emit('message_chunk', {
+                                    'content': content
+                                })
+                                full_response += content
+                                logger.info(f"  发送 message_chunk, 累计长度: {len(full_response)}")
+                else:
+                    logger.warning(f"  chunk['model'] 中没有 'messages' 键")
+            else:
+                logger.warning(f"  chunk 中没有 'model' 键, 实际键: {list(chunk.keys())}")
+        
+        logger.info(f"流式调用完成，总 chunk 数: {chunk_count}, 完整响应长度: {len(full_response)}")
         
         # 发送完成信号
         emit('thinking_end', {})
