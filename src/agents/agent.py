@@ -1558,21 +1558,28 @@ def build_agent(ctx=None):
     with open(config_path, 'r', encoding='utf-8') as f:
         cfg = json.load(f)
     
-    # 优先使用 ARK_API_KEY（火山方舟的 API Key），如果没有则使用 COZE_WORKLOAD_IDENTITY_API_KEY
-    api_key = os.getenv("ARK_API_KEY") or os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
-    base_url = os.getenv("COZE_INTEGRATION_MODEL_BASE_URL")
+    # 使用火山方舟集成获取 API Key
+    try:
+        from coze_workload_identity import Client
+        client = Client()
+        credential = client.get_integration_credential("integration-volcano-ark")
+        api_key_data = json.loads(credential)
+        api_key = api_key_data["ark_api_key"]
+    except Exception as e:
+        # 如果火山方舟集成不可用，则尝试使用环境变量
+        api_key = os.getenv("ARK_API_KEY") or os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
+        if not api_key:
+            raise ValueError(
+                f"无法获取火山方舟 API Key！\n"
+                f"错误详情: {str(e)}\n\n"
+                f"请确保：\n"
+                f"1. 已启用火山方舟集成（integration-volcano-ark）\n"
+                f"2. 或配置了 ARK_API_KEY 环境变量\n"
+                f"3. 或配置了 COZE_WORKLOAD_IDENTITY_API_KEY 环境变量"
+            )
     
-    # 如果没有找到 API Key，抛出清晰的错误
-    if not api_key:
-        raise ValueError(
-            "缺少必需的环境变量！\n"
-            "请配置以下环境变量之一：\n"
-            "1. ARK_API_KEY（推荐，用于火山方舟大模型）\n"
-            "2. COZE_WORKLOAD_IDENTITY_API_KEY（Coze 平台的工作负载标识符）\n\n"
-            "环境变量配置位置：\n"
-            "- 本地开发：在 .env 文件中配置\n"
-            "- Render 部署：在 Render 控制台的 Environment 标签中配置"
-        )
+    # 使用火山方舟的 base_url
+    base_url = "https://ark.cn-beijing.volces.com/api/v3"
     
     llm = ChatOpenAI(
         model=cfg['config'].get("model"),
